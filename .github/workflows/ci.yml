@@ -41,9 +41,9 @@ jobs:
           path: |
             target
             /usr/share/rust/.cargo
-          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -67,9 +67,9 @@ jobs:
           path: |
             target
             /usr/share/rust/.cargo
-          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
       - name: Run cargo clippy
         uses: actions-rs/cargo@v1
         with:
@@ -88,9 +88,9 @@ jobs:
           path: |
             target
             /usr/share/rust/.cargo
-          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
         with:
@@ -128,9 +128,9 @@ jobs:
           path: |
             target
             /usr/share/rust/.cargo
-          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.toml') }}
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
