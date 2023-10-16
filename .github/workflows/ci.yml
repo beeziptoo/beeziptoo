@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v2
+      - uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+  build:
+    name: build (rust-${{ matrix.rust_version }}, ${{ matrix.build_type.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type:
+          - name: debug
+            flags: ""
+          - name: release
+            flags: "--release"
+        rust_version: ["1.66", "stable"]
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v2
+      - name: Cache compilation assets
+        uses: actions/cache@v2
+        env:
+          cache-name: build-${{ matrix.rust_version }}-${{ matrix.build_type.name }}
+        with:
+          path: |
+            target
+            /usr/share/rust/.cargo
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust_version }}
+          override: true
+      - name: Run cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: ${{ matrix.build_type.flags }}
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v2
+      - name: Cache compilation assets
+        uses: actions/cache@v2
+        env:
+          cache-name: clippy
+        with:
+          path: |
+            target
+            /usr/share/rust/.cargo
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+      - name: Run cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --all-targets --all-features -- -D warnings
+  doc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v2
+      - name: Cache compilation assets
+        uses: actions/cache@v2
+        env:
+          cache-name: doc
+        with:
+          path: |
+            target
+            /usr/share/rust/.cargo
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+      - name: Run cargo doc
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --document-private-items --no-deps
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v2
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check -l -v
+  test:
+    name: test (rust-${{ matrix.rust_version }}, ${{ matrix.build_type.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type:
+          - name: debug
+            flags: ""
+          - name: release
+            flags: "--release"
+        rust_version: ["1.66", "stable"]
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v2
+      - name: Cache compilation assets
+        uses: actions/cache@v2
+        env:
+          cache-name: test-${{ matrix.rust_version }}-${{ matrix.build_type.name }}
+        with:
+          path: |
+            target
+            /usr/share/rust/.cargo
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('Cargo.lock') }}
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust_version }}
+          override: true
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: ${{ matrix.build_type.flags }}
