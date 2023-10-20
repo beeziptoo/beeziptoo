@@ -13,18 +13,14 @@ pub(super) fn forward(data: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
     // This is safe because we checked for data being empty above.
-    let mut cur_symbol = data[0];
     let mut run_start = 0;
     let mut output = vec![];
 
     for (i, byte) in data.iter().enumerate() {
         let run_length: u8 = (i - run_start) as u8;
-        if *byte != cur_symbol || run_length == 255 {
+        if *byte != data[run_start] || run_length == 255 {
             encode_run(&data[run_start..i], &mut output);
             run_start = i;
-            if cur_symbol != *byte {
-                cur_symbol = *byte;
-            }
         }
     }
 
