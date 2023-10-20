@@ -8,7 +8,7 @@ pub(crate) enum Error {
 }
 
 /// Convert `data` into a run-length encoded byte array.
-pub(super) fn forward(data: &[u8]) -> Vec<u8> {
+pub(super) fn encode(data: &[u8]) -> Vec<u8> {
     if data.is_empty() {
         return Vec::new();
     }
@@ -27,6 +27,22 @@ pub(super) fn forward(data: &[u8]) -> Vec<u8> {
     encode_run(&data[run_start..], &mut output);
 
     output
+}
+
+/// De-convert `data` from a run-length encoded byte array to a byte array.
+pub(super) fn decode(mut data: &[u8]) -> Result<Vec<u8>, Error> {
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut output = Vec::new();
+
+    while !data.is_empty() {
+        let run = get_run(data)?;
+        data = &data[run.len()..];
+        decode_run(run, &mut output);
+    }
+
+    Ok(output)
 }
 
 fn decode_run(data: &[u8], output: &mut Vec<u8>) {
@@ -77,28 +93,12 @@ fn get_run(data: &[u8]) -> Result<&[u8], Error> {
     }
 }
 
-/// De-convert `data` from a run-length encoded byte array to a byte array.
-pub(super) fn reverse(mut data: &[u8]) -> Result<Vec<u8>, Error> {
-    if data.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut output = Vec::new();
-
-    while !data.is_empty() {
-        let run = get_run(data)?;
-        data = &data[run.len()..];
-        decode_run(run, &mut output);
-    }
-
-    Ok(output)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Test the forward function.
-    mod forward {
+    // Test the encode function.
+    mod encode {
         use super::*;
 
         /// Test with an empty slice.
@@ -106,7 +106,7 @@ mod tests {
         fn empty() {
             let data = b"";
 
-            let encoded = forward(data);
+            let encoded = encode(data);
 
             assert_eq!(encoded, data);
         }
@@ -116,7 +116,7 @@ mod tests {
         fn no_four() {
             let data = b"abbccc";
 
-            let encoded = forward(data);
+            let encoded = encode(data);
 
             assert_eq!(encoded, data);
         }
@@ -126,7 +126,7 @@ mod tests {
         fn big_bytes_four_too_many() {
             let data = [b'e'; 259];
 
-            let encoded = forward(&data);
+            let encoded = encode(&data);
 
             let expected = b"eeee\xfbeeee\0";
             assert_eq!(encoded, expected);
@@ -137,7 +137,7 @@ mod tests {
         fn big_bytes_one_too_many() {
             let data = [b'e'; 256];
 
-            let encoded = forward(&data);
+            let encoded = encode(&data);
 
             let expected = b"eeee\xfbe";
             assert_eq!(encoded, expected);
@@ -202,8 +202,8 @@ mod tests {
         }
     }
 
-    /// Test the reverse function
-    mod reverse {
+    /// Test the decode function
+    mod decode {
         use super::*;
 
         /// Test with runs longer than 255.
@@ -211,7 +211,7 @@ mod tests {
         fn big_bytes_four_too_many() {
             let data = b"eeee\xfbeeee\0";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             let expected = [b'e'; 259];
             assert_eq!(encoded, expected);
@@ -222,7 +222,7 @@ mod tests {
         fn big_bytes_one_too_many() {
             let data = b"eeee\xfbe";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             let expected = [b'e'; 256];
             assert_eq!(encoded, expected);
@@ -233,7 +233,7 @@ mod tests {
         fn empty() {
             let data = b"";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             assert_eq!(encoded, data);
         }
@@ -244,7 +244,7 @@ mod tests {
             // You cannot have a run of 4 with no length after it.
             let data = b"abbcccc";
 
-            match reverse(data) {
+            match decode(data) {
                 Ok(_) => panic!("This should have resulted in an error"),
                 Err(err) => match err {
                     Error::RunLengthTruncated => {}
@@ -257,7 +257,7 @@ mod tests {
         fn no_four() {
             let data = b"abbccc";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             assert_eq!(encoded, data);
         }
@@ -267,7 +267,7 @@ mod tests {
         fn small_run_beginning() {
             let data = b"eeee\x01a";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             let expected = b"eeeeea";
             assert_eq!(encoded, expected);
@@ -278,7 +278,7 @@ mod tests {
         fn small_run_end() {
             let data = b"aeeee\x01";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             let expected = b"aeeeee";
             assert_eq!(encoded, expected);
@@ -289,7 +289,7 @@ mod tests {
         fn small_run_middle() {
             let data = b"aeeee\x01bb";
 
-            let encoded = reverse(data).expect("data should decode");
+            let encoded = decode(data).expect("data should decode");
 
             let expected = b"aeeeeebb";
             assert_eq!(encoded, expected);

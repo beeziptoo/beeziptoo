@@ -52,7 +52,7 @@ where
     let mut all_data = vec![];
     data.read_to_end(&mut all_data)?;
 
-    let rle_data = rle::forward(&all_data);
+    let rle_data = rle::encode(&all_data);
 
     let cursor = Cursor::new(rle_data);
 
@@ -71,7 +71,7 @@ where
     let mut all_data = vec![];
     data.read_to_end(&mut all_data)?;
 
-    let un_rle_data = rle::reverse(&all_data)?;
+    let un_rle_data = rle::decode(&all_data)?;
 
     let cursor = Cursor::new(un_rle_data);
 
