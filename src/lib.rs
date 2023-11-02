@@ -41,8 +41,11 @@ impl From<io::Error> for DecompressError {
 }
 
 impl From<rle::Error> for DecompressError {
-    fn from(_value: rle::Error) -> Self {
-        DecompressError::RunLengthDecode
+    fn from(value: rle::Error) -> Self {
+        match value {
+            rle::Error::RunLengthInvalid(_) => DecompressError::RunLengthDecode,
+            rle::Error::RunLengthTruncated => DecompressError::RunLengthDecode,
+        }
     }
 }
 

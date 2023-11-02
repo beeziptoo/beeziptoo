@@ -3,6 +3,9 @@ use thiserror::Error as ThisError;
 
 #[derive(Debug, ThisError)]
 pub(crate) enum Error {
+    #[error("A run length was invalid: {0}")]
+    RunLengthInvalid(u8),
+
     #[error("The run length encoded array was truncated")]
     RunLengthTruncated,
 }
@@ -39,13 +42,13 @@ pub(super) fn decode(mut data: &[u8]) -> Result<Vec<u8>, Error> {
     while !data.is_empty() {
         let run = get_run(data)?;
         data = &data[run.len()..];
-        decode_run(run, &mut output);
+        decode_run(run, &mut output)?;
     }
 
     Ok(output)
 }
 
-fn decode_run(data: &[u8], output: &mut Vec<u8>) {
+fn decode_run(data: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
     debug_assert!(
         [1, 2, 3, 5].contains(&data.len()),
         "data is an invalid length: {}",
@@ -54,11 +57,15 @@ fn decode_run(data: &[u8], output: &mut Vec<u8>) {
 
     if data.len() < 4 {
         output.extend_from_slice(data);
-    } else {
+    } else if data[4] < 252 {
         for _ in 0..data[data.len() - 1] + 4 {
             output.push(data[0]);
         }
+    } else {
+        return Err(Error::RunLengthInvalid(data[4]));
     }
+
+    Ok(())
 }
 
 fn encode_run(data: &[u8], output: &mut Vec<u8>) {
@@ -240,14 +247,30 @@ mod tests {
 
         /// Invalid input should return an error.
         #[test]
-        fn invalid_input() {
+        fn run_length_truncated() {
             // You cannot have a run of 4 with no length after it.
             let data = b"abbcccc";
 
             match decode(data) {
                 Ok(_) => panic!("This should have resulted in an error"),
                 Err(err) => match err {
+                    Error::RunLengthInvalid(_) => panic!("The wrong error was returned"),
                     Error::RunLengthTruncated => {}
+                },
+            }
+        }
+
+        /// Test with a run length that is too large
+        #[test]
+        fn run_length_invalid() {
+            // 255 is too large for a run length
+            let data = [255, 255, 255, 255, 255];
+
+            match decode(&data[..]) {
+                Ok(_) => panic!("This should have resulted in an error"),
+                Err(err) => match err {
+                    Error::RunLengthInvalid(length) => assert_eq!(length, 255),
+                    Error::RunLengthTruncated => panic!("The wrong error was returned"),
                 },
             }
         }
