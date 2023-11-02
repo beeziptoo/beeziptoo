@@ -73,7 +73,7 @@ where
 /// # Errors
 ///
 /// This function is failable since it is possible the given data isn't a valid `bzip2` archive.
-pub fn decompress<R>(data: &mut R) -> Result<impl Read, DecompressError>
+pub fn decompress<R>(mut data: R) -> Result<impl Read, DecompressError>
 where
     R: Read,
 {
