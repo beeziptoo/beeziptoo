@@ -126,12 +126,12 @@ mod tests {
 
             assert!(matches!(decoded, Err(DecodeError::TooShort)));
         }
-        
+
         /// Test with empty data.
         #[test]
         fn empty() {
-            let decoded = decode(&[]);
-            
+            let decoded = decode(&[]).unwrap();
+
             assert_eq!(decoded, &[]);
         }
     }
