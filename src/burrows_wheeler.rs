@@ -82,6 +82,7 @@ pub(super) fn decode(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
     Ok(output.into())
 }
 
+/// Generate every possible rotation of the given data.
 fn all_rotations(data: &[u8]) -> Vec<Vec<u8>> {
     let mut deque: VecDeque<u8> = data.iter().copied().collect();
     let mut output = Vec::with_capacity(deque.len());
