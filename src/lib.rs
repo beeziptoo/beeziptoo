@@ -4,6 +4,7 @@
 use std::io::{self, Cursor, Read};
 
 mod burrows_wheeler;
+mod move_to_front;
 mod rle;
 
 /// These are the possible errors that can occur during compression.
@@ -65,8 +66,10 @@ where
 
     let rle_data = rle::encode(&all_data);
     let burrows_wheeler_data = burrows_wheeler::encode(&rle_data);
+    let move_to_front_data = move_to_front::encode(&burrows_wheeler_data);
+    let rle_data = rle::encode(&move_to_front_data);
 
-    let cursor = Cursor::new(burrows_wheeler_data);
+    let cursor = Cursor::new(rle_data);
 
     Ok(cursor)
 }
@@ -83,7 +86,9 @@ where
     let mut all_data = vec![];
     data.read_to_end(&mut all_data)?;
 
-    let un_burrows_wheeler_data = burrows_wheeler::decode(&all_data)?;
+    let un_rle_data = rle::decode(&all_data)?;
+    let un_move_to_front_data = move_to_front::decode(&un_rle_data);
+    let un_burrows_wheeler_data = burrows_wheeler::decode(&un_move_to_front_data)?;
     let un_rle_data = rle::decode(&un_burrows_wheeler_data)?;
 
     let cursor = Cursor::new(un_rle_data);
