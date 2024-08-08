@@ -16,6 +16,10 @@ pub enum DecodeError {
     #[error("The header should be the bytes BZh, but was not.")]
     InvalidHeader,
 
+    /// IOError while reading the input.
+    #[error("IOError: {0}")]
+    IOError(#[from] std::io::Error),
+
     /// Unexpected end of stream.
     #[error("Unexpected end of stream.")]
     UnexpectedEof,
@@ -23,6 +27,13 @@ pub enum DecodeError {
     /// Invalid block header (BCD pi)
     #[error("The block header should be BCD-coded pi.")]
     InvalidBlockHeader,
+
+    /// Invalid `randomized` bit.
+    ///
+    /// The `Randomized` field is a single bit, and in bzip2 should always be 0. This error means
+    /// it was 1, which is unexpected.
+    #[error("The Randomized field should be 0, but was 1.")]
+    InvalidRandomizedField,
 }
 
 pub fn decode(bytes: &[u8]) -> Result<HuffmanCodedData, DecodeError> {
@@ -30,6 +41,15 @@ pub fn decode(bytes: &[u8]) -> Result<HuffmanCodedData, DecodeError> {
     let (block_size, bytes) = block_size(bytes)?;
     let bytes = bcd_pi(bytes)?;
     let (crc, bytes) = crc32(bytes)?;
+
+    let mut stream = bitstream::Bitstream::new(bytes);
+
+    match stream.get_next_bit()? {
+        Some(bitstream::Bit::Zero) => { // Do nothing, this is the expected value
+        }
+        Some(bitstream::Bit::One) => return Err(DecodeError::InvalidRandomizedField),
+        None => return Err(DecodeError::UnexpectedEof),
+    };
 
     Ok(HuffmanCodedData::default())
 }

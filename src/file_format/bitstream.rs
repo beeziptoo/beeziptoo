@@ -22,6 +22,36 @@ pub(super) struct Bitstream<R> {
     bit_pointer: u8,
 }
 
+trait FromBits {
+    fn from_bits(value: &[Bit]) -> Self;
+}
+
+impl FromBits for u32 {
+    fn from_bits(value: &[Bit]) -> Self {
+        assert!(
+            value.len() <= 32,
+            "Cannot convert {} bits into a u32",
+            value.len()
+        );
+
+        let mut x = 0;
+        for bit in value {
+            x = x << 1;
+
+            match bit {
+                Bit::Zero => {
+                    // Nothing to do
+                }
+                Bit::One => {
+                    x = x | 1;
+                }
+            }
+        }
+
+        x
+    }
+}
+
 impl<R> Bitstream<R>
 where
     R: Read,
@@ -36,7 +66,22 @@ where
         }
     }
 
-    fn get_next_bit(&mut self) -> io::Result<Option<Bit>> {
+    pub(super) fn get_integer<T>(&mut self, num_bits_to_read: u8) -> Result<T, super::DecodeError>
+    where
+        T: FromBits,
+    {
+        let bits: Vec<Bit> = (0..num_bits_to_read)
+            .map(|_| {
+                self.get_next_bit()
+                    .map_err(|e| e.into())
+                    .and_then(|b| b.ok_or_else(|| super::DecodeError::UnexpectedEof))
+            })
+            .collect::<Result<Vec<_>, super::DecodeError>>()?;
+
+        Ok(T::from_bits(&bits))
+    }
+
+    pub(super) fn get_next_bit(&mut self) -> io::Result<Option<Bit>> {
         if self.buffer_pointer == self.buffer_size {
             debug_assert_eq!(self.bit_pointer, 7);
             self.buffer_size = self.inner.read(&mut self.buffer[..])?.try_into().unwrap();
@@ -100,5 +145,15 @@ mod tests {
                 Bit::Zero
             ]
         );
+    }
+
+    #[test]
+    fn get_integer() {
+        let input: [u8; 4] = 0x0074740e_u32.to_be_bytes();
+        let mut bitstream = Bitstream::new(&input[..]);
+
+        let value: u32 = bitstream.get_integer(24).expect("This should fit in a u32");
+
+        assert_eq!(value, 0x7474);
     }
 }
