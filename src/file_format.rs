@@ -78,9 +78,14 @@ where
 
     fn stream(&mut self) -> Result<BZipStream, DecodeError> {
         let header = self.stream_header()?;
+        let blocks = vec![];
         let footer = self.stream_footer()?;
 
-        Ok(BZipStream { header, footer })
+        Ok(BZipStream {
+            header,
+            blocks,
+            footer,
+        })
     }
 
     /// Read the stream footer
@@ -165,7 +170,7 @@ struct BZipStream {
     header: StreamHeader,
     // Bring these back when we are ready for them, which the universe will reveal in time
     // (spacetime).
-    //block: Vec<StreamBlock>,
+    blocks: Vec<StreamBlock>,
     footer: StreamFooter,
 }
 
@@ -335,7 +340,8 @@ mod tests {
                     let file = parser.parse().expect("This should not fail to parse");
 
                     assert_eq!(file.stream.header.level.0, 1);
-                    panic!("What kind of assertions can we make?");
+                    assert_eq!(file.stream.blocks.len(), 0);
+                    assert_eq!(file.stream.footer.crc.0, 0);
                 }
 
                 /// Test with a level 9 compressed file.
@@ -347,7 +353,8 @@ mod tests {
                     let file = parser.parse().expect("This should not fail to parse");
 
                     assert_eq!(file.stream.header.level.0, 9);
-                    panic!("What kind of assertions can we make?");
+                    assert_eq!(file.stream.blocks.len(), 0);
+                    assert_eq!(file.stream.footer.crc.0, 0);
                 }
             }
         }

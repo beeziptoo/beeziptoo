@@ -91,8 +91,6 @@ where
     }
 
     pub(super) fn get_next_bit(&mut self) -> io::Result<Option<Bit>> {
-        dbg!(self.buffer_pointer);
-        dbg!(self.buffer_size);
         if self.buffer_pointer == self.buffer_size {
             debug_assert_eq!(self.bit_pointer, 7);
             self.buffer_size = self.inner.read(&mut self.buffer[..])?.try_into().unwrap();
@@ -125,10 +123,7 @@ where
     /// advance the buffer_pointer. This non-advancement is important so that [is_empty] can
     /// correctly detect if we examined all the bytes or not.
     pub(super) fn get_padding(&mut self) -> Vec<Bit> {
-        let bits_to_read = 8 - self.bit_pointer;
-        dbg!(bits_to_read);
-        dbg!(self.bit_pointer);
-        dbg!(self.buffer_pointer);
+        let bits_to_read = 7 - self.bit_pointer;
 
         if bits_to_read == 0 {
             return vec![];
@@ -207,5 +202,18 @@ mod tests {
         let value: u32 = bitstream.get_integer(24).expect("This should fit in a u32");
 
         assert_eq!(value, 0x7474);
+    }
+
+    #[test]
+    fn get_padding() {
+        let input: &[u8] = &[10];
+
+        let mut bitstream = Bitstream::new(input);
+        let _: u8 = bitstream.get_integer(4).unwrap();
+
+        assert_eq!(
+            bitstream.get_padding(),
+            &[Bit::One, Bit::Zero, Bit::One, Bit::Zero]
+        );
     }
 }
