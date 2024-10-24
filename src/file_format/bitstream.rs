@@ -22,7 +22,7 @@ pub(super) struct Bitstream<R> {
     bit_pointer: u8,
 }
 
-trait FromBits {
+pub trait FromBits {
     fn from_bits(value: &[Bit]) -> Self;
 }
 
@@ -38,14 +38,14 @@ macro_rules! impl_from_bits {
 
                 let mut x = 0;
                 for bit in value {
-                    x = x << 1;
+                    x <<= 1;
 
                     match bit {
                         Bit::Zero => {
                             // Nothing to do
                         }
                         Bit::One => {
-                            x = x | 1;
+                            x |= 1;
                         }
                     }
                 }

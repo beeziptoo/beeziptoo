@@ -148,7 +148,7 @@ where
 
     fn level(&mut self) -> Result<Level, DecodeError> {
         let level: u8 = self.bitstream.get_integer(8)?;
-        if level < b'1' || level > b'9' {
+        if !(b'1'..=b'9').contains(&level) {
             return Err(DecodeError::InvalidBlockSize);
         }
 
@@ -260,7 +260,7 @@ struct BlockSize(u32);
 
 impl BlockSize {
     fn new(block_size: u8) -> Result<Self, DecodeError> {
-        if block_size < b'1' || block_size > b'9' {
+        if !(b'1'..=b'9').contains(&block_size) {
             return Err(DecodeError::InvalidBlockSize);
         }
 

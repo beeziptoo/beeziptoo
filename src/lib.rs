@@ -123,7 +123,7 @@ mod tests {
         let mut data = decompress(&bytes[..]).expect("Cannot decompress test data");
 
         let mut buffer = vec![];
-        let bytes = data
+        let _bytes = data
             .read_to_end(&mut buffer)
             .expect("Cannot read decompressed data");
         assert_eq!(buffer, b"Hello can you hear me?");

@@ -36,7 +36,7 @@ pub(super) fn encode(data: &[u8]) -> Vec<u8> {
 
 /// Errors that can occur when decoding a Burrows-Wheeler array.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum DecodeError {
+pub enum DecodeError {
     #[error("input must be at least 4 bytes")]
     TooShort,
     #[error("origin pointer out of range")]
