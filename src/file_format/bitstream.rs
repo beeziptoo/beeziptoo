@@ -63,6 +63,18 @@ impl_from_bits!(u16, 16);
 impl_from_bits!(u32, 32);
 impl_from_bits!(u64, 64);
 
+/// TODO
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+struct Peek {
+    /// TODO
+    bits: Vec<Bit>,
+    /// TODO
+    new_buffer_pointer: usize,
+    /// TODO
+    new_bit_pointer: u8,
+}
+
 impl<R> Bitstream<R>
 where
     R: Read,
@@ -77,51 +89,103 @@ where
         }
     }
 
-    pub(super) fn get_integer<T>(&mut self, num_bits_to_read: u8) -> Result<T, super::DecodeError>
+    pub(super) fn get_integer<T>(&mut self, num_bits_to_read: u8) -> io::Result<T>
     where
         T: FromBits,
     {
         let bits: Vec<Bit> = (0..num_bits_to_read)
-            .map(|_| {
-                self.get_next_bit()
-                    .map_err(|e| e.into())
-                    .and_then(|b| b.ok_or_else(|| super::DecodeError::UnexpectedEof))
-            })
-            .collect::<Result<Vec<_>, super::DecodeError>>()?;
+            .map(|_| self.get_next_bit())
+            .collect::<Result<Vec<_>, io::Error>>()?;
 
         Ok(T::from_bits(&bits))
     }
 
-    pub(super) fn get_next_bit(&mut self) -> io::Result<Option<Bit>> {
-        if self.buffer_pointer == self.buffer_size {
-            debug_assert_eq!(self.bit_pointer, 7);
-            self.shift_and_read()?;
-        }
-
-        if self.buffer_size == 0 {
-            return Ok(None);
-        }
-
-        let bit = if (1 << self.bit_pointer) & self.buffer[self.buffer_pointer as usize] == 0 {
-            Bit::Zero
-        } else {
-            Bit::One
-        };
-
-        if self.bit_pointer == 0 {
-            self.buffer_pointer += 1;
-            self.bit_pointer = 7;
-        } else {
-            self.bit_pointer -= 1;
-        }
-
-        Ok(Some(bit))
+    // TODONEXT
+    pub(super) fn peek_integer<T>(&mut self, num_bits_to_read: u8) -> io::Result<T> {
+        todo!()
     }
 
+    /// Read n bits without moving the bit pointer.
+    ///
+    /// This will return `UnexpectedEof` if there are fewer than `n` bits left to read.
+    ///
+    /// # Panics
+    ///
+    /// - If n > 8 * (BUFFER_SIZE - 1).
+    fn peek_n_bits(&mut self, n: usize) -> io::Result<Peek> {
+        assert!(
+            // The -1 is necessary because we may have an incompletely consumed byte that we need
+            // to keep.
+            n <= 8 * (BUFFER_SIZE - 1),
+            "n must be less than or equal to {} but was {}",
+            8 * (BUFFER_SIZE - 1),
+            n
+        );
+
+        if self.bits_in_buffer() < n {
+            self.shift_and_read()?;
+        }
+        if self.bits_in_buffer() < n {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "couldn't read enough bits",
+            ));
+        }
+
+        let mut bits = vec![];
+        let mut new_bit_pointer = self.bit_pointer;
+        let mut new_buffer_pointer = self.buffer_pointer;
+
+        for _ in 0..n {
+            let bit = if (1 << new_bit_pointer) & self.buffer[new_buffer_pointer] == 0 {
+                Bit::Zero
+            } else {
+                Bit::One
+            };
+            bits.push(bit);
+
+            if new_bit_pointer == 0 {
+                new_buffer_pointer += 1;
+                new_bit_pointer = 7;
+            } else {
+                new_bit_pointer -= 1;
+            }
+        }
+
+        Ok(Peek {
+            bits,
+            new_buffer_pointer,
+            new_bit_pointer,
+        })
+    }
+
+    /// Returns how many bits are left in the buffer.
+    fn bits_in_buffer(&self) -> usize {
+        if self.buffer_size == self.buffer_pointer {
+            return 0;
+        }
+
+        let next_byte_to_read = self.buffer_pointer + 1;
+        let totally_unread_bits = (self.buffer_size - next_byte_to_read) * 8;
+
+        (self.bit_pointer as usize + 1) + totally_unread_bits
+    }
+
+    pub(super) fn get_next_bit(&mut self) -> io::Result<Bit> {
+        let peek = self.peek_n_bits(1)?;
+
+        self.bit_pointer = peek.new_bit_pointer;
+        self.buffer_pointer = peek.new_buffer_pointer;
+
+        Ok(peek.bits[0])
+    }
+
+    /// Shift the bytes in the buffer to the front of the buffer and fill the rest by attempting to
+    /// read from the underlying reader.
     fn shift_and_read(&mut self) -> io::Result<()> {
         self.buffer
             .copy_within(self.buffer_pointer..self.buffer_size, 0);
-        self.buffer_size = self.buffer_size - self.buffer_pointer;
+        self.buffer_size -= self.buffer_pointer;
         self.buffer_pointer = 0;
         self.buffer_size += self.inner.read(&mut self.buffer[self.buffer_size..])?;
 
@@ -141,20 +205,19 @@ where
         }
 
         (0..bits_to_read)
-            .map(|_| {
-                self.get_next_bit()
-                    .expect("We should not need to read when calling this")
-                    .ok_or(())
-            })
+            .map(|_| self.get_next_bit())
             .collect::<Result<Vec<_>, _>>()
             .expect("All bits should have been Some but they were not")
     }
 
     /// Return `true` if there are no bits that haven't been consumed.
-    ///
-    /// This is used by tests to assert that the entire file was processed.
     pub(super) fn is_empty(&mut self) -> io::Result<bool> {
-        Ok(self.get_next_bit()?.is_none())
+        let peek = self.peek_n_bits(1);
+        match peek {
+            Ok(_) => Ok(false),
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => Ok(true),
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -174,7 +237,11 @@ where
     type Item = io::Result<Bit>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.get_next_bit().transpose()
+        match self.get_next_bit() {
+            Ok(bit) => Some(Ok(bit)),
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => None,
+            Err(err) => Some(Err(err)),
+        }
     }
 }
 
@@ -276,6 +343,127 @@ mod tests {
             assert_eq!(bitstream.buffer[..4], [253, 254, 255, 0]);
             assert_eq!(bitstream.bit_pointer, 3);
             assert_eq!(bitstream.buffer_pointer, 0);
+        }
+    }
+
+    mod bits_in_buffer {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            let bs = Bitstream::new(&b""[..]);
+            assert_eq!(bs.bits_in_buffer(), 0);
+        }
+
+        #[test]
+        fn two_read() {
+            let mut bs = Bitstream::new(&b"\x01\x10"[..]);
+            let _ = bs.get_integer::<u16>(2);
+            assert_eq!(bs.bits_in_buffer(), 14);
+        }
+
+        #[test]
+        fn one_left() {
+            let mut bs = Bitstream::new(&b"\x01\x10"[..]);
+            let _ = bs.get_integer::<u16>(15);
+            assert_eq!(bs.bits_in_buffer(), 1);
+        }
+
+        #[test]
+        fn fully_read() {
+            let mut bs = Bitstream::new(&b"\x01\x10"[..]);
+            let _ = bs.get_integer::<u16>(16);
+            assert_eq!(bs.bits_in_buffer(), 0);
+        }
+    }
+
+    mod peek_n_bits {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            let mut bs = Bitstream::new(&b""[..]);
+            assert_eq!(
+                bs.peek_n_bits(1).unwrap_err().kind(),
+                io::ErrorKind::UnexpectedEof
+            );
+        }
+
+        #[test]
+        fn zero() {
+            let mut bs = Bitstream::new(&b""[..]);
+            assert_eq!(
+                bs.peek_n_bits(0).unwrap(),
+                Peek {
+                    bits: vec![],
+                    new_buffer_pointer: 0,
+                    new_bit_pointer: 7
+                }
+            );
+        }
+
+        #[test]
+        fn one() {
+            let mut bs = Bitstream::new(&b"\x80"[..]);
+            assert_eq!(
+                bs.peek_n_bits(1).unwrap(),
+                Peek {
+                    bits: vec![Bit::One],
+                    new_buffer_pointer: 0,
+                    new_bit_pointer: 6,
+                }
+            );
+        }
+
+        #[test]
+        fn two() {
+            let mut bs = Bitstream::new(&b"\x80"[..]);
+            assert_eq!(
+                bs.peek_n_bits(2).unwrap(),
+                Peek {
+                    bits: vec![Bit::One, Bit::Zero],
+                    new_buffer_pointer: 0,
+                    new_bit_pointer: 5,
+                }
+            );
+        }
+
+        #[test]
+        fn cross_boundary() {
+            let mut bs = Bitstream::new(&b"\x80\x80"[..]);
+            let _ = bs.get_integer::<u8>(7);
+            assert_eq!(
+                bs.peek_n_bits(2).unwrap(),
+                Peek {
+                    bits: vec![Bit::Zero, Bit::One],
+                    new_buffer_pointer: 1,
+                    new_bit_pointer: 6,
+                }
+            );
+        }
+
+        #[test]
+        fn last() {
+            let mut bs = Bitstream::new(&b"\x00\x01"[..]);
+            let _ = bs.get_integer::<u16>(15);
+            assert_eq!(
+                bs.peek_n_bits(1).unwrap(),
+                Peek {
+                    bits: vec![Bit::One],
+                    new_buffer_pointer: 2,
+                    new_bit_pointer: 7,
+                }
+            );
+        }
+
+        #[test]
+        fn error_beyond_end() {
+            let mut bs = Bitstream::new(&b"\x00"[..]);
+            let _ = bs.get_integer::<u8>(8);
+            assert_eq!(
+                bs.peek_n_bits(1).unwrap_err().kind(),
+                io::ErrorKind::UnexpectedEof
+            );
         }
     }
 }

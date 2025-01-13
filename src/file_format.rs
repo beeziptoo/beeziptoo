@@ -4,7 +4,7 @@
 // TODO remove
 #![allow(unused)]
 
-use std::io::Read;
+use std::io::{self, ErrorKind, Read};
 
 use self::bitstream::Bitstream;
 use crate::huffman::HuffmanCodedData;
@@ -30,10 +30,6 @@ pub enum DecodeError {
     #[error("IOError: {0}")]
     IOError(#[from] std::io::Error),
 
-    /// Unexpected end of stream.
-    #[error("Unexpected end of stream.")]
-    UnexpectedEof,
-
     /// Invalid block header (BCD pi)
     #[error("The block header should be BCD-coded pi.")]
     InvalidBlockHeader,
@@ -44,6 +40,12 @@ pub enum DecodeError {
     /// it was 1, which is unexpected.
     #[error("The Randomized field should be 0, but was 1.")]
     InvalidRandomizedField,
+}
+
+impl DecodeError {
+    fn unexpected_eof(msg: &'static str) -> Self {
+        Self::IOError(io::Error::new(ErrorKind::UnexpectedEof, msg))
+    }
 }
 
 // = Parser ====================================================================
@@ -288,7 +290,7 @@ impl BlockSize {
 
 fn block_size(bytes: &[u8]) -> Result<(BlockSize, &[u8]), DecodeError> {
     if bytes.is_empty() {
-        return Err(DecodeError::UnexpectedEof);
+        return Err(DecodeError::unexpected_eof("there were no bytes"));
     }
 
     Ok((BlockSize::new(bytes[0])?, &bytes[1..]))
@@ -296,7 +298,7 @@ fn block_size(bytes: &[u8]) -> Result<(BlockSize, &[u8]), DecodeError> {
 
 fn validate_header(bytes: &[u8]) -> Result<&[u8], DecodeError> {
     if bytes.len() < 3 {
-        return Err(DecodeError::UnexpectedEof);
+        return Err(DecodeError::unexpected_eof("there were fewer than 3 bytes"));
     }
 
     match bytes {
@@ -307,7 +309,7 @@ fn validate_header(bytes: &[u8]) -> Result<&[u8], DecodeError> {
 
 fn bcd_pi(bytes: &[u8]) -> Result<&[u8], DecodeError> {
     if bytes.len() < 6 {
-        return Err(DecodeError::UnexpectedEof);
+        return Err(DecodeError::unexpected_eof("there were fewer than 6 bytes"));
     }
 
     match bytes {
@@ -322,7 +324,7 @@ fn bcd_pi(bytes: &[u8]) -> Result<&[u8], DecodeError> {
 
 fn crc32(bytes: &[u8]) -> Result<(u32, &[u8]), DecodeError> {
     if bytes.len() < 4 {
-        return Err(DecodeError::UnexpectedEof);
+        return Err(DecodeError::unexpected_eof("there were fewer than 4 bytes"));
     }
 
     let (crc, rest) = bytes.split_at(4);
