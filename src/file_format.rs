@@ -70,11 +70,9 @@ where
     fn blocks(&mut self) -> Result<Vec<StreamBlock>, DecodeError> {
         let mut blocks = vec![];
 
-        /*
         while let Some(block) = self.next_block()? {
             blocks.push(block);
         }
-        */
 
         Ok(blocks)
     }
@@ -170,7 +168,13 @@ where
     }
 
     fn next_block(&mut self) -> Result<Option<StreamBlock>, DecodeError> {
-        todo!()
+        let maybe_magic: u64 = self.bitstream.peek_integer(48)?;
+
+        if maybe_magic != 0x314159265359 {
+            return Ok(None);
+        }
+
+        todo!("We need to read the next block so we can be cool")
     }
 }
 

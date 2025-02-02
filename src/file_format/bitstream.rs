@@ -32,10 +32,15 @@ macro_rules! impl_from_bits {
     ($kind:ty, $size:expr) => {
         impl FromBits for $kind {
             fn from_bits(value: &[Bit]) -> Self {
-                assert!(
+                debug_assert!(
                     value.len() <= $size,
                     concat!("Cannot convert {} bits into a ", stringify!($kind)),
                     value.len()
+                );
+                debug_assert!(
+                    value.len() > 0,
+                    "Cannot build a {} out of 0 bits",
+                    stringify!($kind)
                 );
 
                 let mut x = 0;
@@ -100,9 +105,17 @@ where
         Ok(T::from_bits(&bits))
     }
 
-    // TODONEXT
-    pub(super) fn peek_integer<T>(&mut self, num_bits_to_read: u8) -> io::Result<T> {
-        todo!()
+    /// Read the next integer of the requested number of bits without moving the cursor.
+    ///
+    /// It is an error to set `num_bits_to_read` to `0`. In debug mode this will panic. In release
+    /// mode, this will return a `0`.
+    pub(super) fn peek_integer<T>(&mut self, num_bits_to_read: u8) -> io::Result<T>
+    where
+        T: FromBits,
+    {
+        let Peek { bits, .. } = self.peek_n_bits(num_bits_to_read.into())?;
+
+        Ok(T::from_bits(&bits))
     }
 
     /// Read n bits without moving the bit pointer.
@@ -374,6 +387,88 @@ mod tests {
             let mut bs = Bitstream::new(&b"\x01\x10"[..]);
             let _ = bs.get_integer::<u16>(16);
             assert_eq!(bs.bits_in_buffer(), 0);
+        }
+    }
+
+    /// Test [`Bitstream::peek_integer`].
+    mod peek_integer {
+        use super::*;
+
+        #[test]
+        fn empty() {
+            let mut bs = Bitstream::new(&b""[..]);
+
+            let result: io::Result<u8> = bs.peek_integer(1);
+
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+        }
+
+        #[test]
+        #[should_panic = "Cannot build a u8 out of 0 bits"]
+        #[cfg(debug_assertions)]
+        fn zero() {
+            let mut bs = Bitstream::new(&b""[..]);
+
+            let res: u8 = bs.peek_integer(0).unwrap();
+        }
+
+        #[test]
+        #[cfg(not(debug_assertions))]
+        fn zero() {
+            let mut bs = Bitstream::new(&b""[..]);
+
+            let res: u8 = bs.peek_integer(0).unwrap();
+
+            // In release mode this returns 0 instead of panicking
+            assert_eq!(res, 0);
+        }
+
+        #[test]
+        fn one() {
+            let mut bs = Bitstream::new(&b"\x80"[..]);
+
+            let result: u8 = bs.peek_integer(1).unwrap();
+
+            assert_eq!(result, 1);
+        }
+
+        #[test]
+        fn two() {
+            let mut bs = Bitstream::new(&b"\x80"[..]);
+
+            let result: u8 = bs.peek_integer(2).unwrap();
+
+            assert_eq!(result, 2);
+        }
+
+        #[test]
+        fn cross_boundary() {
+            let mut bs = Bitstream::new(&b"\x80\x80"[..]);
+            let _ = bs.get_integer::<u8>(7);
+
+            let result: u8 = bs.peek_integer(2).unwrap();
+
+            assert_eq!(result, 1);
+        }
+
+        #[test]
+        fn last() {
+            let mut bs = Bitstream::new(&b"\x00\x01"[..]);
+            let _ = bs.get_integer::<u16>(15);
+
+            let result: u8 = bs.peek_integer(1).unwrap();
+
+            assert_eq!(result, 1);
+        }
+
+        #[test]
+        fn error_beyond_end() {
+            let mut bs = Bitstream::new(&b"\x00"[..]);
+            let _ = bs.get_integer::<u8>(8);
+
+            let result: io::Result<u8> = bs.peek_integer(1);
+
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
         }
     }
 
