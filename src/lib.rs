@@ -98,16 +98,21 @@ where
     R: Read,
 {
     let mut all_data = vec![];
+    let mut decompressed_data = vec![];
     data.read_to_end(&mut all_data)?;
 
-    let huffman_data = file_format::decode(&all_data)?;
-    let un_huffman_data = huffman::decode(&huffman_data)?;
-    let un_rle2 = rle2::decode(&un_huffman_data);
-    let un_move_to_front_data = move_to_front::decode(&un_rle2);
-    let un_burrows_wheeler_data = burrows_wheeler::decode(&un_move_to_front_data)?;
-    let un_rle_data = rle1::decode(&un_burrows_wheeler_data)?;
+    let un_file_data = file_format::decode(&all_data)?;
 
-    let cursor = Cursor::new(un_rle_data);
+    for symbols in &un_file_data {
+        let un_huffman_data = huffman::decode(symbols);
+        let un_rle2 = rle2::decode(&un_huffman_data);
+        let un_move_to_front_data = move_to_front::decode(&un_rle2);
+        let un_burrows_wheeler_data = burrows_wheeler::decode(&un_move_to_front_data)?;
+        let mut un_rle_data = rle1::decode(&un_burrows_wheeler_data)?;
+        decompressed_data.append(&mut un_rle_data);
+    }
+
+    let cursor = Cursor::new(decompressed_data);
 
     Ok(cursor)
 }

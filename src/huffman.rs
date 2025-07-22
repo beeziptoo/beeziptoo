@@ -3,10 +3,17 @@
 use std::collections::{BinaryHeap, HashMap};
 
 use super::rle2;
+use crate::file_format::bitstream::Bitstream;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Invalid node index")]
     InvalidNodeIndex,
+
+    #[error("IoError: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("The bitstream was truncated")]
     TruncatedBitstream,
 }
 
@@ -27,7 +34,7 @@ struct HuffmanBlock {
 }
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
-enum Symbol {
+pub(crate) enum Symbol {
     RunA,
     RunB,
     Byte(u16),
@@ -57,9 +64,11 @@ impl From<&Symbol> for rle2::Symbol {
 }
 
 pub(crate) mod tree {
+    use crate::file_format::bitstream::Bit;
+
     use super::*;
 
-    use std::cmp::Reverse;
+    use std::{cmp::Reverse, io::Read};
 
     type SymbolBitMap = HashMap<Symbol, Vec<bool>>;
 
@@ -149,53 +158,29 @@ pub(crate) mod tree {
             bitvec
         }
 
-        // TODONEXT: The `decode()` function below takes a &[u8] (where bytes are really bits) and
-        // returns a `Vec<Symbol>`. This is an impossible function signature because when we are
-        // parsing block data, we don't know we're done until we hit the Eob symbol.
-        //
-        // Instead, we need to be able to give a `BitReader` to the tree and have it pull bits out
-        // of the bitreader until it reaches a symbol. Something like the below signature.
-        //
-        // pub(crate) fn decode(&self, bits: &mut BitReader) -> Result<Symbol, Error> {}
-        //
-        // This function might not be implemented here but instead over in the file format module
-        // (maybe).
-
-        pub(crate) fn decode(&self, mut input: &[u8]) -> Result<Vec<Symbol>, Error> {
-            let mut symbols = Vec::new();
+        /// Decode one `Symbol` from the `bitstream`.
+        pub(crate) fn decode<R>(&self, bitstream: &mut Bitstream<R>) -> Result<Symbol, Error>
+        where
+            R: Read,
+        {
             let mut location = self.root;
 
-            while !input.is_empty() {
+            loop {
                 let node = self.nodes.get(location.0).ok_or(Error::InvalidNodeIndex)?;
                 match node {
                     Node::Leaf(symbol) => {
-                        symbols.push(*symbol);
-                        location = self.root;
+                        return Ok(*symbol);
                     }
                     Node::Branch(left, right) => {
-                        let Some((first, rest)) = input.split_first() else {
-                            unreachable!()
-                        };
-                        input = rest;
-                        match *first {
-                            0 => location = *left,
-                            1 => location = *right,
-                            // These values are really bits. Eventually, we'll make this impossible in the
-                            // type system.
-                            _ => unreachable!(),
+                        let next_bit = bitstream.get_next_bit()?;
+
+                        match next_bit {
+                            Bit::Zero => location = *left,
+                            Bit::One => location = *right,
                         }
                     }
                 }
             }
-
-            let node = self.nodes.get(location.0).ok_or(Error::InvalidNodeIndex)?;
-            if let Node::Leaf(symbol) = node {
-                symbols.push(*symbol);
-            } else {
-                return Err(Error::TruncatedBitstream);
-            }
-
-            Ok(symbols)
         }
 
         fn build_symbol_bitmap(root: NodeIdx, nodes: &[Node]) -> SymbolBitMap {
@@ -431,20 +416,30 @@ pub(crate) mod tree {
 
                 let tree: Tree = symbol_lengths.try_into().unwrap();
 
-                assert_eq!(tree.decode(&[0, 0]).unwrap(), vec![Symbol::RunA]);
-                assert_eq!(tree.decode(&[1, 0, 1, 0, 0]).unwrap(), vec![Symbol::RunB]);
                 assert_eq!(
-                    tree.decode(&[1, 0, 1, 1, 0]).unwrap(),
-                    vec![Symbol::Byte(4)]
-                );
-                assert_eq!(tree.decode(&[1; 9]).unwrap(), vec![Symbol::Byte(15)]);
-                assert_eq!(
-                    tree.decode(&[1, 1, 1, 1, 1, 1, 0, 0]).unwrap(),
-                    vec![Symbol::Byte(17)]
+                    tree.decode(&mut Bitstream::new(&[0_u8][..])).unwrap(),
+                    Symbol::RunA
                 );
                 assert_eq!(
-                    tree.decode(&[1, 1, 1, 1, 1, 1, 1, 0]).unwrap(),
-                    vec![Symbol::Eob]
+                    tree.decode(&mut Bitstream::new(&[160_u8][..])).unwrap(),
+                    Symbol::RunB
+                );
+                assert_eq!(
+                    tree.decode(&mut Bitstream::new(&[176_u8][..])).unwrap(),
+                    Symbol::Byte(4)
+                );
+                assert_eq!(
+                    tree.decode(&mut Bitstream::new(&[255_u8, 128_u8][..]))
+                        .unwrap(),
+                    Symbol::Byte(15)
+                );
+                assert_eq!(
+                    tree.decode(&mut Bitstream::new(&[252_u8][..])).unwrap(),
+                    Symbol::Byte(17)
+                );
+                assert_eq!(
+                    tree.decode(&mut Bitstream::new(&[254_u8][..])).unwrap(),
+                    Symbol::Eob
                 );
             }
         }
@@ -593,17 +588,8 @@ pub(super) fn encode(data: &[rle2::Symbol]) -> HuffmanCodedData {
 }
 
 /// Decode the `Symbol`s back to bytes.
-pub(super) fn decode(data: &HuffmanCodedData) -> Result<Vec<rle2::Symbol>, Error> {
-    let mut output = Vec::new();
-
-    for block in &data.blocks {
-        let tree = &data.trees[block.tree_index as usize];
-        let mut symbols = tree.decode(block.bitvec.as_slice())?;
-        output.append(&mut symbols);
-    }
-
-    Ok(output
-        .iter()
+pub(super) fn decode(data: &[Symbol]) -> Vec<rle2::Symbol> {
+    data.iter()
         .filter_map(|symbol| {
             if *symbol != Symbol::Eob {
                 Some(symbol.into())
@@ -611,7 +597,7 @@ pub(super) fn decode(data: &HuffmanCodedData) -> Result<Vec<rle2::Symbol>, Error
                 None
             }
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
@@ -638,8 +624,11 @@ mod tests {
             rle2::Symbol::Byte(0),
         ];
 
+        todo!("Uncomment and fix this test");
+        /*
         let output = decode(&encode(input)).unwrap();
 
         assert_eq!(input.as_slice(), output);
+        */
     }
 }

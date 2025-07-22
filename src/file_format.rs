@@ -9,9 +9,9 @@ use std::io::{self, ErrorKind, Read};
 use bitstream::Bit;
 
 use self::bitstream::Bitstream;
-use crate::huffman::{self, tree::Tree, HuffmanCodedData};
+use crate::huffman::{self, tree::Tree, HuffmanCodedData, Symbol};
 
-mod bitstream;
+pub(crate) mod bitstream;
 
 /// Errors that can occur when decoding bzip2 streams.
 #[derive(Debug, thiserror::Error)]
@@ -19,6 +19,10 @@ pub enum DecodeError {
     /// Invalid block size
     #[error("Invalid block size")]
     InvalidBlockSize,
+
+    /// Invalid data while decoding a tree
+    #[error("The bitstream follows an invalid path in a huffman tree")]
+    InvalidData,
 
     /// Invalid footer magic
     #[error("The footer magic should be the BCD-encoded square root of pi, but was not.")]
@@ -99,6 +103,13 @@ where
     fn parse(mut self) -> Result<BZipFile, DecodeError> {
         let stream = self.stream()?;
 
+        for _ in 0..7 {
+            match self.bitstream.get_next_bit() {
+                Ok(Bit::Zero) => continue,
+                Ok(Bit::One) => return Err(DecodeError::InvalidData),
+                Err(_) => break,
+            }
+        }
         debug_assert!(
             self.bitstream.is_empty()?,
             "The parser failed to read the entire stream."
@@ -195,7 +206,7 @@ where
 
         let header = self.block_header()?;
         let trees = self.block_trees()?;
-        let data = self.block_data()?;
+        let data = self.block_data(&trees)?;
 
         Ok(Some(StreamBlock {
             header,
@@ -315,11 +326,31 @@ where
 
     // TODO: This method needs to take trees as a parameter because we need to call
     // `Tree::decode()` to figure out when we're done reading.
-    fn block_data(&mut self) -> Result<BlockData, DecodeError> {
-        // We have to decode symbols using the Huffman tree until we encounter EOB
-        // TODO: Call `Tree::decode()` (after refactoring its signature as described in the
-        // TODONEXT).
-        todo!()
+    fn block_data(&mut self, trees: &BlockTrees) -> Result<BlockData, DecodeError> {
+        let mut symbols = vec![];
+
+        'outer: for selector in &trees.selectors {
+            let tree = trees
+                .trees
+                .get(selector.0 as usize)
+                .ok_or_else(|| DecodeError::InvalidSelector)?;
+
+            for _ in 0..50 {
+                let symbol = tree.decode(&mut self.bitstream).map_err(|err| match err {
+                    huffman::Error::InvalidNodeIndex => DecodeError::InvalidData,
+                    huffman::Error::IoError(error) => DecodeError::IOError(error),
+                    huffman::Error::TruncatedBitstream => DecodeError::InvalidData,
+                })?;
+
+                symbols.push(symbol);
+
+                if let Symbol::Eob = symbol {
+                    break 'outer;
+                }
+            }
+        }
+
+        Ok(BlockData(symbols))
     }
 }
 
@@ -414,12 +445,8 @@ struct HeaderMagic;
 #[derive(Debug)]
 struct Version;
 
-// TODO: This type is probably going to have to change to hold a `Vec<Symbol>` (where `Symbol` is
-// the output of `Tree::decode()`. The reason for this is we don't know when we're done reading
-// bits until we encounter an `Eob` symbol, so it's pointless (and impossible) to store "unparsed"
-// bits.
 #[derive(Debug)]
-struct BlockData;
+struct BlockData(Vec<Symbol>);
 
 #[derive(Debug)]
 struct FooterMagic;
@@ -430,16 +457,20 @@ struct Padding(Vec<bitstream::Bit>);
 
 // =============================================================================
 
-pub fn decode(bytes: &[u8]) -> Result<HuffmanCodedData, DecodeError> {
+pub fn decode(bytes: &[u8]) -> Result<Vec<Vec<Symbol>>, DecodeError> {
     let mut stream = bitstream::Bitstream::new(bytes);
     let mut parser = Parser::new(stream);
 
     let bzip_file = parser.parse()?;
 
-    dbg!(bzip_file);
+    let symbols = bzip_file
+        .stream
+        .blocks
+        .into_iter()
+        .map(|block| block.data.0)
+        .collect();
 
-    // Maybe this could be a bzip_file.into()?
-    Ok(HuffmanCodedData::default())
+    Ok(symbols)
 }
 
 /// The block size of the uncompressed data, in bytes.

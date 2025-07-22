@@ -68,6 +68,10 @@ pub(super) fn decode(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
     let origin_pointer = usize::from_le_bytes(array);
 
     if origin_pointer > data.len() - 1 {
+        // TODONEXT: Something is weird with the origin pointer. We have noticed that it is in the
+        // bzip header, and that we don't seem to use it after parsing it from the header. A unit
+        // test fails right at this check, so investigate what's up with the unused origin pointer
+        // from the header. Maybe even use it.
         return Err(DecodeError::InvalidOriginPointer);
     }
 

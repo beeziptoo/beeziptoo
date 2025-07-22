@@ -2,7 +2,7 @@ use std::io::{self, Read};
 
 /// A bit.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub(super) enum Bit {
+pub(crate) enum Bit {
     Zero,
     One,
 }
@@ -10,7 +10,7 @@ pub(super) enum Bit {
 const BUFFER_SIZE: usize = 512;
 
 /// An adapter over a reader that turns a byte slice into an iterator of bits.
-pub(super) struct Bitstream<R> {
+pub(crate) struct Bitstream<R> {
     /// The reader.
     inner: R,
     /// The bytes we've read which still need handling.
@@ -84,7 +84,7 @@ impl<R> Bitstream<R>
 where
     R: Read,
 {
-    pub(super) fn new(inner: R) -> Bitstream<R> {
+    pub(crate) fn new(inner: R) -> Bitstream<R> {
         Bitstream {
             inner,
             buffer: Box::new([0; 512]),
@@ -184,7 +184,7 @@ where
         (self.bit_pointer as usize + 1) + totally_unread_bits
     }
 
-    pub(super) fn get_next_bit(&mut self) -> io::Result<Bit> {
+    pub(crate) fn get_next_bit(&mut self) -> io::Result<Bit> {
         let peek = self.peek_n_bits(1)?;
 
         self.bit_pointer = peek.new_bit_pointer;
