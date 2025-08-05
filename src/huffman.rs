@@ -18,6 +18,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Default)]
+#[expect(unused)] // TODO: Should be used when we encode.
 pub(super) struct HuffmanCodedData {
     /// This is the set of trees used in the encoded data.
     trees: Vec<tree::Tree>,
@@ -26,6 +27,7 @@ pub(super) struct HuffmanCodedData {
 }
 
 #[derive(Debug, Default)]
+#[expect(unused)] // TODO: Should be used when we encode.
 struct HuffmanBlock {
     /// Points into [`HuffmanCodedData::trees`] to indicate which tree was used for this block.
     tree_index: u8,
@@ -380,6 +382,7 @@ pub(crate) mod tree {
         bitmap
     }
 
+    #[cfg(test)]
     mod tests {
         use super::*;
 
@@ -606,6 +609,7 @@ mod tests {
 
     #[test]
     fn roundtrip() {
+        #[expect(unused)]
         let input = &[
             rle2::Symbol::RunA,
             rle2::Symbol::Byte(2),

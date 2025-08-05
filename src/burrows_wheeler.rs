@@ -1,5 +1,28 @@
 //! Define the Burrows-Wheeler encode and decode steps.
-use std::{collections::VecDeque, mem};
+use std::collections::VecDeque;
+
+use crate::file_format::OriginPointer;
+
+/// Stores BWT-encoded information.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct BwtEncoded {
+    /// The encoded data.
+    pub(crate) data: Vec<u8>,
+
+    /// The index of the original row in the sorted rotation block.
+    ///
+    /// This is required for decoding.
+    pub(crate) origin_pointer: OriginPointer,
+}
+
+impl BwtEncoded {
+    pub(crate) fn new(data: Vec<u8>, origin_pointer: OriginPointer) -> Self {
+        BwtEncoded {
+            data,
+            origin_pointer,
+        }
+    }
+}
 
 /// Encode with the Burrows-Wheeler Transform.
 ///
@@ -7,40 +30,38 @@ use std::{collections::VecDeque, mem};
 ///
 /// The origin pointer (index of original row in the sorted rotation block) is appended to the end of the
 /// data as 3 little-endian bytes.
-pub(super) fn encode(data: &[u8]) -> Vec<u8> {
+pub(super) fn encode(data: &[u8]) -> BwtEncoded {
     // ASSUMPTION max block size for this stage is 900 kB
     assert!(data.len() < 900_000);
 
     if data.is_empty() {
-        return Vec::new();
+        return BwtEncoded::default();
     }
 
     let mut all_rotations = all_rotations(data);
     all_rotations.sort_unstable();
-    let origin_pointer = all_rotations
+    let origin_pointer: OriginPointer = all_rotations
         .binary_search_by_key(&data, |v| &v[..])
-        .expect("`data` must be in `all_rotations`");
-    let mut output: Vec<u8> = all_rotations
+        .expect("`data` must be in `all_rotations`")
+        .try_into()
+        .expect("`origin_pointer` must fit into 24 bits");
+    let data: Vec<u8> = all_rotations
         .into_iter()
         .map(|mut v| {
             v.pop()
                 .expect("presence of outer `Vec` means inner `Vec` was not empty")
         })
         .collect();
-    // Encode the origin pointer as a 24-bit unsigned little-endian integer.
-    // ASSUMPTION the origin pointer should be little-endian.
-    // TODO: We're pretty sure that the spec indicates origin pointer ought to be big endian, but
-    // we haven't fixed it yet.
-    output.extend_from_slice(&origin_pointer.to_le_bytes()[..3]);
 
-    output
+    BwtEncoded {
+        data,
+        origin_pointer,
+    }
 }
 
 /// Errors that can occur when decoding a Burrows-Wheeler array.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
-    #[error("input must be at least 4 bytes")]
-    TooShort,
     #[error("origin pointer out of range")]
     InvalidOriginPointer,
 }
@@ -49,24 +70,21 @@ pub enum DecodeError {
 ///
 /// # Notes
 ///
+/// TODO: Delete
 /// The origin pointer (index of original row in the sorted rotation block) is appended to the end of the
 /// input data as 3 little-endian bytes.
-pub(super) fn decode(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
+pub(super) fn decode(
+    BwtEncoded {
+        data,
+        origin_pointer,
+    }: &BwtEncoded,
+) -> Result<Vec<u8>, DecodeError> {
     // ASSUMPTION it is valid for this to be empty
     if data.is_empty() {
         return Ok(Vec::new());
     }
 
-    if data.len() < 4 {
-        return Err(DecodeError::TooShort);
-    }
-
-    let (data, origin_pointer) = data.split_at(data.len() - 3);
-    let mut array = [0_u8; mem::size_of::<usize>()];
-    array[..3].copy_from_slice(origin_pointer);
-    // ASSUMPTION the origin pointer is encoded as little-endian
-    let origin_pointer = usize::from_le_bytes(array);
-
+    let origin_pointer: usize = origin_pointer.try_into().unwrap();
     if origin_pointer > data.len() - 1 {
         // TODONEXT: Something is weird with the origin pointer. We have noticed that it is in the
         // bzip header, and that we don't seem to use it after parsing it from the header. A unit
@@ -117,26 +135,20 @@ mod tests {
 
         #[test]
         fn small() {
-            let input = b"dabc\x02\x00\x00";
+            let input = BwtEncoded {
+                data: b"dabc".to_vec(),
+                origin_pointer: 2.into(),
+            };
 
-            let decoded = decode(input).unwrap();
+            let decoded = decode(&input).unwrap();
 
             assert_eq!(decoded, b"cdab");
-        }
-
-        #[test]
-        fn too_small() {
-            let input = b"\x00";
-
-            let decoded = decode(input);
-
-            assert!(matches!(decoded, Err(DecodeError::TooShort)));
         }
 
         /// Test with empty data.
         #[test]
         fn empty() {
-            let decoded = decode(&[]).unwrap();
+            let decoded = decode(&BwtEncoded::default()).unwrap();
 
             assert_eq!(decoded, &[]);
         }
@@ -150,15 +162,16 @@ mod tests {
 
             let encoded = encode(input);
 
-            assert_eq!(&encoded[..4], b"dabc");
-            assert_eq!(&encoded[4..], &[2, 0, 0]);
+            assert_eq!(encoded.data, b"dabc");
+            let origin_pointer: usize = encoded.origin_pointer.try_into().unwrap();
+            assert_eq!(origin_pointer, 2);
         }
 
         #[test]
         fn empty() {
             let encoded = encode(&[]);
 
-            assert_eq!(encoded, &[]);
+            assert_eq!(encoded.data, BwtEncoded::default().data);
         }
     }
 

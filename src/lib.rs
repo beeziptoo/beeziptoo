@@ -4,6 +4,8 @@
 //! Because we wanted to implement `bzip2`, too.
 use std::io::{self, Cursor, Read};
 
+use crate::burrows_wheeler::BwtEncoded;
+
 mod burrows_wheeler;
 mod file_format;
 mod huffman;
@@ -75,8 +77,10 @@ where
     data.read_to_end(&mut all_data)?;
 
     let rle_data = rle1::encode(&all_data);
+    // TODO: Origin pointer is unused here. When we write out the file in the correct format, we
+    // will use it then.
     let burrows_wheeler_data = burrows_wheeler::encode(&rle_data);
-    let move_to_front_data = move_to_front::encode(&burrows_wheeler_data);
+    let move_to_front_data = move_to_front::encode(&burrows_wheeler_data.data);
     let rle2_data = rle2::encode(&move_to_front_data);
     let _huffman_data = huffman::encode(&rle2_data);
     // This is a stub to satisfy the return type. We need to put something here that can turn
@@ -103,11 +107,14 @@ where
 
     let un_file_data = file_format::decode(&all_data)?;
 
-    for symbols in &un_file_data {
-        let un_huffman_data = huffman::decode(symbols);
+    for block in &un_file_data {
+        let un_huffman_data = huffman::decode(block.symbols());
         let un_rle2 = rle2::decode(&un_huffman_data);
         let un_move_to_front_data = move_to_front::decode(&un_rle2);
-        let un_burrows_wheeler_data = burrows_wheeler::decode(&un_move_to_front_data)?;
+        let un_burrows_wheeler_data = burrows_wheeler::decode(&BwtEncoded::new(
+            un_move_to_front_data,
+            block.origin_pointer(),
+        ))?;
         let mut un_rle_data = rle1::decode(&un_burrows_wheeler_data)?;
         decompressed_data.append(&mut un_rle_data);
     }
@@ -131,6 +138,10 @@ mod tests {
         let _bytes = data
             .read_to_end(&mut buffer)
             .expect("Cannot read decompressed data");
+        // TODONEXT: `buffer` ends up being all ones. We don't have the energy to debug this right
+        // now. We're banking on future us having the energy to debug this.
+        //
+        // I'm sorry.
         assert_eq!(buffer, b"Hello can you hear me?");
     }
 }

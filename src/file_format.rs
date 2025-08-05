@@ -4,7 +4,10 @@
 // TODO remove
 #![allow(unused)]
 
-use std::io::{self, ErrorKind, Read};
+use std::{
+    io::{self, ErrorKind, Read},
+    num::TryFromIntError,
+};
 
 use bitstream::Bit;
 
@@ -380,10 +383,20 @@ struct StreamHeader {
 }
 
 #[derive(Debug)]
-struct StreamBlock {
+pub(crate) struct StreamBlock {
     header: BlockHeader,
     trees: BlockTrees,
     data: BlockData,
+}
+
+impl StreamBlock {
+    pub(crate) fn symbols(&self) -> &[Symbol] {
+        &self.data.0
+    }
+
+    pub(crate) fn origin_pointer(&self) -> OriginPointer {
+        self.header.orig_ptr
+    }
 }
 
 #[derive(Debug)]
@@ -420,8 +433,40 @@ struct BlockCrc(u32);
 #[derive(Debug)]
 struct Randomized(u8);
 
-#[derive(Debug)]
-struct OriginPointer(u32);
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct OriginPointer(u32);
+
+impl TryFrom<usize> for OriginPointer {
+    type Error = TryFromIntError;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(OriginPointer(value.try_into()?))
+    }
+}
+
+// TODO: `.into()` should work here since we don't think Rust supports any 16-bit
+// platforms. What gives?
+impl TryFrom<OriginPointer> for usize {
+    type Error = TryFromIntError;
+
+    fn try_from(value: OriginPointer) -> Result<Self, Self::Error> {
+        value.0.try_into()
+    }
+}
+
+impl TryFrom<&OriginPointer> for usize {
+    type Error = TryFromIntError;
+
+    fn try_from(value: &OriginPointer) -> Result<Self, Self::Error> {
+        value.0.try_into()
+    }
+}
+
+impl From<u32> for OriginPointer {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
 
 #[derive(Debug)]
 struct SymbolMap {
@@ -457,20 +502,13 @@ struct Padding(Vec<bitstream::Bit>);
 
 // =============================================================================
 
-pub fn decode(bytes: &[u8]) -> Result<Vec<Vec<Symbol>>, DecodeError> {
+pub fn decode(bytes: &[u8]) -> Result<Vec<StreamBlock>, DecodeError> {
     let mut stream = bitstream::Bitstream::new(bytes);
     let mut parser = Parser::new(stream);
 
     let bzip_file = parser.parse()?;
 
-    let symbols = bzip_file
-        .stream
-        .blocks
-        .into_iter()
-        .map(|block| block.data.0)
-        .collect();
-
-    Ok(symbols)
+    Ok(bzip_file.stream.blocks)
 }
 
 /// The block size of the uncompressed data, in bytes.
