@@ -48,7 +48,12 @@ impl From<&rle2::Symbol> for Symbol {
         match value {
             rle2::Symbol::RunA => Self::RunA,
             rle2::Symbol::RunB => Self::RunB,
-            rle2::Symbol::Byte(byte) => Self::Byte(*byte as u16 + 1),
+            // TODO: We used to add 1 on this line, in 20d0518aa8c5bb26b7489aabdb8ad763d2f5dfda, but we
+            // found that there was a bug where we were off by 1 in the symbol values. There was
+            // some dicussion around whether this transformation should do that, or perhaps whether
+            // something else should be responsible for doing it. Perhaps consider whether we do
+            // want this +1 here for cleanliness.
+            rle2::Symbol::Byte(byte) => Self::Byte(*byte as u16),
         }
     }
 }
@@ -58,7 +63,9 @@ impl From<&Symbol> for rle2::Symbol {
         match value {
             Symbol::RunA => rle2::Symbol::RunA,
             Symbol::RunB => rle2::Symbol::RunB,
-            Symbol::Byte(byte) => rle2::Symbol::Byte((*byte - 1) as u8),
+            // TODO: We used to subtract 1 here. See TODO in the above From impl going the other
+            // direction.
+            Symbol::Byte(byte) => rle2::Symbol::Byte((*byte) as u8),
             // We'll strip off the EOB symbol before calling this function.
             Symbol::Eob => unreachable!(),
         }
@@ -576,7 +583,6 @@ pub(super) fn encode(data: &[rle2::Symbol]) -> HuffmanCodedData {
     symbol_weights.insert(Symbol::Eob, 1);
 
     let tree = tree::Tree::new(symbol_weights);
-    dbg!(&tree);
 
     let bits = tree.encode(data);
     let block = HuffmanBlock {
