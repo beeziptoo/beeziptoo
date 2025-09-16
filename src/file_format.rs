@@ -137,6 +137,7 @@ where
     fn stream_footer(&mut self) -> Result<StreamFooter, DecodeError> {
         Ok(StreamFooter {
             magic: self.footer_magic()?,
+            // TODO: Check the crc
             crc: self.stream_crc()?,
             padding: self.footer_padding()?,
         })

@@ -160,4 +160,30 @@ mod tests {
             assert_eq!(std::str::from_utf8(&buffer).unwrap(), peter_piper);
         }
     }
+
+    // This was found by the fuzzer.
+    #[test]
+    fn four_bytes() {
+        let sample = [0x04, 0x00, 0x00, 0x00];
+
+        let mut child = Command::new("bzip2")
+            .arg("-c")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        {
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(&sample).unwrap();
+        }
+        let bytes = child.wait_with_output().unwrap().stdout;
+
+        let mut data = decompress(&bytes[..]).expect("Cannot decompress test data");
+
+        let mut buffer = vec![];
+        let _bytes = data
+            .read_to_end(&mut buffer)
+            .expect("Cannot read decompressed data");
+        assert_eq!(buffer, sample);
+    }
 }
