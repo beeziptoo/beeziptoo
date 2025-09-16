@@ -162,6 +162,7 @@ mod tests {
     }
 
     // This was found by the fuzzer.
+    // TODONEXT
     #[test]
     fn four_bytes() {
         let sample = [0x04, 0x00, 0x00, 0x00];
