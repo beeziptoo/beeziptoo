@@ -91,6 +91,8 @@ pub(super) fn decode(
     }
 
     // TODO benchmark `Vec` instead of `VecDeque`.
+    // TODONEXT: Randy did a little benchmarking and found that this loop in incredibly slow. We
+    // should focus on it next time.
     let mut table: Vec<VecDeque<u8>> = vec![VecDeque::new(); data.len()];
     for _ in 0..data.len() {
         for (byte, row) in data.iter().zip(table.iter_mut()) {
