@@ -205,13 +205,16 @@ where
         Ok(())
     }
 
-    /// Get the padding bits from the end of the stream.
+    /// Sync up the bitstream with a byte boundary.
     ///
-    /// This function will read between 0 and 7 of the last bits at the current byte, but will not
-    /// advance the buffer_pointer. This non-advancement is important so that [is_empty] can
-    /// correctly detect if we examined all the bytes or not.
+    /// This function reads and returns enough bits out of the bitstream so that there are no
+    /// partially consumed bytes in the buffer.
     pub(super) fn get_padding(&mut self) -> Vec<Bit> {
-        let bits_to_read = 7 - self.bit_pointer;
+        let bits_to_read = if self.buffer_pointer == self.buffer_size {
+            0
+        } else {
+            self.bit_pointer + 1
+        };
 
         if bits_to_read == 0 {
             return vec![];
