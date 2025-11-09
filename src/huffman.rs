@@ -331,7 +331,7 @@ pub(crate) mod tree {
     /// <https://en.wikipedia.org/wiki/Canonical_Huffman_code#Pseudocode>
     fn canonical_huffman_table(symbol_lengths: &[u8]) -> SymbolBitMap {
         debug_assert!(
-            symbol_lengths.len() >= 1,
+            !symbol_lengths.is_empty(),
             "symbol_lengths must have at least one item"
         );
         let mut sorted_values = symbol_lengths.to_owned();

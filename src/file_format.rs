@@ -321,7 +321,7 @@ where
         let bytes: Vec<u8> = pre_mtf_selectors.into_iter().map(|s| s.0).collect();
         let symbol_stack: Vec<u8> = (0..num_trees).collect();
         let selectors = crate::move_to_front::decode(&bytes, SymbolStack(symbol_stack));
-        let selectors: Vec<Selector> = selectors.into_iter().map(|s| Selector(s)).collect();
+        let selectors: Vec<Selector> = selectors.into_iter().map(Selector).collect();
 
         let mut trees = vec![];
         for _ in 0..num_trees {
@@ -344,7 +344,7 @@ where
             let tree = trees
                 .trees
                 .get(selector.0 as usize)
-                .ok_or_else(|| DecodeError::InvalidSelector)?;
+                .ok_or(DecodeError::InvalidSelector)?;
 
             for _ in 0..50 {
                 let symbol = tree.decode(&mut self.bitstream).map_err(|err| match err {
@@ -511,14 +511,16 @@ impl SymbolMap {
 
         for (offset, l2) in l1_reader
             .enumerate()
-            .filter_map(|(idx, bit)| (bit == Bit::One).then(|| idx * 16))
+            .filter(|&(idx, bit)| (bit == Bit::One))
+            .map(|(idx, bit)| idx * 16)
             .zip(&self.l2)
         {
             let l2 = l2.to_be_bytes();
             let l2_reader = Bitstream::new(&l2[..]).map(Result::unwrap);
             for symbol in l2_reader
-                .zip((0..16).into_iter())
-                .filter_map(|(bit, i)| (bit == Bit::One).then(|| offset + i))
+                .zip(0..16)
+                .filter(|&(bit, i)| (bit == Bit::One))
+                .map(|(bit, i)| offset + i)
             {
                 output.push(symbol.try_into().unwrap());
             }
