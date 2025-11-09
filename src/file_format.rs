@@ -349,7 +349,7 @@ where
             for _ in 0..50 {
                 let symbol = tree.decode(&mut self.bitstream).map_err(|err| match err {
                     huffman::Error::InvalidNodeIndex => DecodeError::InvalidData,
-                    huffman::Error::IoError(error) => DecodeError::IOError(error),
+                    huffman::Error::Io(error) => DecodeError::IOError(error),
                     huffman::Error::TruncatedBitstream => DecodeError::InvalidData,
                 })?;
 

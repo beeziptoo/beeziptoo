@@ -11,7 +11,7 @@ pub enum Error {
     InvalidNodeIndex,
 
     #[error("IoError: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
 
     #[error("The bitstream was truncated")]
     TruncatedBitstream,
