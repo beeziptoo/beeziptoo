@@ -154,7 +154,7 @@ mod tests {
             let mut data = decompress(&bytes[..]).expect("Cannot decompress test data");
 
             let mut buffer = vec![];
-            let _bytes = data
+            let _num_bytes = data
                 .read_to_end(&mut buffer)
                 .expect("Cannot read decompressed data");
             assert_eq!(std::str::from_utf8(&buffer).unwrap(), peter_piper);
