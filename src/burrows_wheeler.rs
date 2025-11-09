@@ -90,19 +90,53 @@ pub(super) fn decode(
         return Err(DecodeError::InvalidOriginPointer);
     }
 
-    // TODO benchmark `Vec` instead of `VecDeque`.
-    // TODONEXT: Randy did a little benchmarking and found that this loop in incredibly slow. We
-    // should focus on it next time.
-    let mut table: Vec<VecDeque<u8>> = vec![VecDeque::new(); data.len()];
-    for _ in 0..data.len() {
-        for (byte, row) in data.iter().zip(table.iter_mut()) {
-            row.push_front(*byte);
-        }
-        table.sort_unstable();
+    // The commented Python code was taking from the dsnet PDF, section 2.2.1.2.
+    // cumm, n = [0]*256, 0
+    let mut frequency_histogram: [u64; 256] = [0; _];
+    let mut n = 0;
+
+    // for v in bwt:
+    //     cumm[v] += 1
+    for value in data.iter() {
+        frequency_histogram[*value as usize] += 1;
     }
 
-    let output = table.swap_remove(origin_pointer);
-    Ok(output.into())
+    // for i, v in enumerate(cumm):
+    //     cumm[i] = n
+    //     n += v
+    for value in frequency_histogram.iter_mut() {
+        let copy = *value;
+        *value = n;
+        n += copy;
+    }
+
+    // perm = [0]*len(bwt)
+    let mut permutation = vec![0; data.len()];
+
+    // for i, v in enumerate(bwt):
+    //     perm[cumm[v]] = i
+    //     cumm[v] += 1
+    for (index, value) in data.iter().enumerate() {
+        // TODO: Is this outer cast as usize OK? The inner is, because the value is a u8 and the
+        // histogram is 256 long, but I don't know about the permutation.
+        permutation[frequency_histogram[*value as usize] as usize] = index;
+        frequency_histogram[*value as usize] += 1;
+    }
+
+    // i = perm[ptr]
+    let mut input_index = permutation[origin_pointer];
+    // data = bytearray(len(bwt))
+    let mut output = vec![0; data.len()];
+
+    // for j in range(len(bwt)):
+    //     data[j] = bwt[i]
+    //     i = perm[i]
+    for output in output.iter_mut() {
+        *output = data[input_index];
+        input_index = permutation[input_index];
+    }
+
+    Ok(output)
 }
 
 /// Generate every possible rotation of the given data.

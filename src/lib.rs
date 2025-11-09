@@ -2,6 +2,9 @@
 //! beeziptoo
 //!
 //! Because we wanted to implement `bzip2`, too.
+//!
+//! <https://github.com/dsnet/compress/blob/master/doc/bzip2-format.pdf> was used as a reference
+//! when writing this library.
 use std::io::{self, Cursor, Read};
 
 use crate::burrows_wheeler::BwtEncoded;
