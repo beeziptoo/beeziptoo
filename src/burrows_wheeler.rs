@@ -1,5 +1,28 @@
 //! Define the Burrows-Wheeler encode and decode steps.
-use std::{collections::VecDeque, mem};
+use std::collections::VecDeque;
+
+use crate::file_format::OriginPointer;
+
+/// Stores BWT-encoded information.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct BwtEncoded {
+    /// The encoded data.
+    pub(crate) data: Vec<u8>,
+
+    /// The index of the original row in the sorted rotation block.
+    ///
+    /// This is required for decoding.
+    pub(crate) origin_pointer: OriginPointer,
+}
+
+impl BwtEncoded {
+    pub(crate) fn new(data: Vec<u8>, origin_pointer: OriginPointer) -> Self {
+        BwtEncoded {
+            data,
+            origin_pointer,
+        }
+    }
+}
 
 /// Encode with the Burrows-Wheeler Transform.
 ///
@@ -7,38 +30,38 @@ use std::{collections::VecDeque, mem};
 ///
 /// The origin pointer (index of original row in the sorted rotation block) is appended to the end of the
 /// data as 3 little-endian bytes.
-pub(super) fn encode(data: &[u8]) -> Vec<u8> {
+pub(super) fn encode(data: &[u8]) -> BwtEncoded {
     // ASSUMPTION max block size for this stage is 900 kB
     assert!(data.len() < 900_000);
 
     if data.is_empty() {
-        return Vec::new();
+        return BwtEncoded::default();
     }
 
     let mut all_rotations = all_rotations(data);
     all_rotations.sort_unstable();
-    let origin_pointer = all_rotations
+    let origin_pointer: OriginPointer = all_rotations
         .binary_search_by_key(&data, |v| &v[..])
-        .expect("`data` must be in `all_rotations`");
-    let mut output: Vec<u8> = all_rotations
+        .expect("`data` must be in `all_rotations`")
+        .try_into()
+        .expect("`origin_pointer` must fit into 24 bits");
+    let data: Vec<u8> = all_rotations
         .into_iter()
         .map(|mut v| {
             v.pop()
                 .expect("presence of outer `Vec` means inner `Vec` was not empty")
         })
         .collect();
-    // Encode the origin pointer as a 24-bit unsigned little-endian integer.
-    // ASSUMPTION the origin pointer should be little-endian.
-    output.extend_from_slice(&origin_pointer.to_le_bytes()[..3]);
 
-    output
+    BwtEncoded {
+        data,
+        origin_pointer,
+    }
 }
 
 /// Errors that can occur when decoding a Burrows-Wheeler array.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum DecodeError {
-    #[error("input must be at least 4 bytes")]
-    TooShort,
+pub enum DecodeError {
     #[error("origin pointer out of range")]
     InvalidOriginPointer,
 }
@@ -47,39 +70,73 @@ pub(super) enum DecodeError {
 ///
 /// # Notes
 ///
-/// The origin pointer (index of original row in the sorted rotation block) is appended to the end of the
-/// input data as 3 little-endian bytes.
-pub(super) fn decode(data: &[u8]) -> Result<Vec<u8>, DecodeError> {
+/// If the input to this function is wrong, it is possible for this function to produce a row that
+/// is not a rotation of the input. The algorithm is quite sensitive to the encoder and decoder
+/// using the same sort ordering, and if they do not it is possible to get a row that is missing
+/// characters.
+pub(super) fn decode(
+    BwtEncoded {
+        data,
+        origin_pointer,
+    }: &BwtEncoded,
+) -> Result<Vec<u8>, DecodeError> {
     // ASSUMPTION it is valid for this to be empty
     if data.is_empty() {
         return Ok(Vec::new());
     }
 
-    if data.len() < 4 {
-        return Err(DecodeError::TooShort);
-    }
-
-    let (data, origin_pointer) = data.split_at(data.len() - 3);
-    let mut array = [0_u8; mem::size_of::<usize>()];
-    array[..3].copy_from_slice(origin_pointer);
-    // ASSUMPTION the origin pointer is encoded as little-endian
-    let origin_pointer = usize::from_le_bytes(array);
-
+    let origin_pointer: usize = origin_pointer.try_into().unwrap();
     if origin_pointer > data.len() - 1 {
         return Err(DecodeError::InvalidOriginPointer);
     }
 
-    // TODO benchmark `Vec` instead of `VecDeque`.
-    let mut table: Vec<VecDeque<u8>> = vec![VecDeque::new(); data.len()];
-    for _ in 0..data.len() {
-        for (byte, row) in data.iter().zip(table.iter_mut()) {
-            row.push_front(*byte);
-        }
-        table.sort_unstable();
+    // The commented Python code was taking from the dsnet PDF, section 2.2.1.2.
+    // cumm, n = [0]*256, 0
+    let mut frequency_histogram: [u64; 256] = [0; _];
+    let mut n = 0;
+
+    // for v in bwt:
+    //     cumm[v] += 1
+    for value in data.iter() {
+        frequency_histogram[*value as usize] += 1;
     }
 
-    let output = table.swap_remove(origin_pointer);
-    Ok(output.into())
+    // for i, v in enumerate(cumm):
+    //     cumm[i] = n
+    //     n += v
+    for value in frequency_histogram.iter_mut() {
+        let copy = *value;
+        *value = n;
+        n += copy;
+    }
+
+    // perm = [0]*len(bwt)
+    let mut permutation = vec![0; data.len()];
+
+    // for i, v in enumerate(bwt):
+    //     perm[cumm[v]] = i
+    //     cumm[v] += 1
+    for (index, value) in data.iter().enumerate() {
+        // TODO: Is this outer cast as usize OK? The inner is, because the value is a u8 and the
+        // histogram is 256 long, but I don't know about the permutation.
+        permutation[frequency_histogram[*value as usize] as usize] = index;
+        frequency_histogram[*value as usize] += 1;
+    }
+
+    // i = perm[ptr]
+    let mut input_index = permutation[origin_pointer];
+    // data = bytearray(len(bwt))
+    let mut output = vec![0; data.len()];
+
+    // for j in range(len(bwt)):
+    //     data[j] = bwt[i]
+    //     i = perm[i]
+    for output in output.iter_mut() {
+        *output = data[input_index];
+        input_index = permutation[input_index];
+    }
+
+    Ok(output)
 }
 
 /// Generate every possible rotation of the given data.
@@ -109,28 +166,41 @@ mod tests {
     mod decode {
         use super::*;
 
+        /// This tests the example from
+        /// <https://en.wikipedia.org/wiki/Burrows%E2%80%93Wheeler_transform>.
         #[test]
-        fn small() {
-            let input = b"dabc\x02\x00\x00";
+        fn banana() {
+            // Wikipedia uses a $, which sorts last in their example. However, in ASCII the $
+            // character will sort first. As a result, we can't use the example as is and have it
+            // work. It just so happens that we can use lower case s as a substitute, because it
+            // will sort first out of this set of characters.
+            let input = BwtEncoded {
+                data: b"BNN^AAsA".to_vec(),
+                origin_pointer: 6.into(),
+            };
 
-            let decoded = decode(input).unwrap();
+            let decoded = decode(&input).unwrap();
 
-            assert_eq!(decoded, b"cdab");
+            // Note above that we substituted an s for $ so we sort the same as Wikipedia.
+            assert_eq!(decoded, b"^BANANAs");
         }
 
         #[test]
-        fn too_small() {
-            let input = b"\x00";
+        fn small() {
+            let input = BwtEncoded {
+                data: b"dabc".to_vec(),
+                origin_pointer: 2.into(),
+            };
 
-            let decoded = decode(input);
+            let decoded = decode(&input).unwrap();
 
-            assert!(matches!(decoded, Err(DecodeError::TooShort)));
+            assert_eq!(decoded, b"cdab");
         }
 
         /// Test with empty data.
         #[test]
         fn empty() {
-            let decoded = decode(&[]).unwrap();
+            let decoded = decode(&BwtEncoded::default()).unwrap();
 
             assert_eq!(decoded, &[]);
         }
@@ -144,15 +214,16 @@ mod tests {
 
             let encoded = encode(input);
 
-            assert_eq!(&encoded[..4], b"dabc");
-            assert_eq!(&encoded[4..], &[2, 0, 0]);
+            assert_eq!(encoded.data, b"dabc");
+            let origin_pointer: usize = encoded.origin_pointer.try_into().unwrap();
+            assert_eq!(origin_pointer, 2);
         }
 
         #[test]
         fn empty() {
             let encoded = encode(&[]);
 
-            assert_eq!(encoded, &[]);
+            assert_eq!(encoded.data, BwtEncoded::default().data);
         }
     }
 
