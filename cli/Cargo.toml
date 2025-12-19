@@ -14,5 +14,5 @@ rust-version = "1.89"
 
 [dependencies]
 anyhow = "1"
-beeziptoo = { path = ".." }
+beeziptoo = { verion = "0.0", path = ".." }
 clap = { version = "4", features = ["derive"] }
