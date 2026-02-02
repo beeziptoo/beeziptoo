@@ -1,4 +1,4 @@
-// Copyright ® 2023-2024 Andrew Halle and Randy Barlow
+// Copyright © 2023-2026 Andrew Halle and Randy Barlow
 //! beeziptoo
 //!
 //! Because we wanted to implement `bzip2`, too.

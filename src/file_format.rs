@@ -1,4 +1,4 @@
-// Copyright ® 2023-2025 Andrew Halle and Randy Barlow
+// Copyright © 2023-2026 Andrew Halle and Randy Barlow
 //! Read and write the bzip2 file format.
 
 // TODO remove
