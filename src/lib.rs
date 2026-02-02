@@ -37,7 +37,7 @@
 //! ```
 use std::io::{self, Cursor, Read};
 
-use crate::burrows_wheeler::BwtEncoded;
+use crate::{burrows_wheeler::BwtEncoded, file_format::bzip_crc32};
 
 mod burrows_wheeler;
 mod file_format;
@@ -63,6 +63,9 @@ impl From<io::Error> for CompressError {
 /// These are the possible errors that can occur during decompression.
 #[derive(Debug, thiserror::Error)]
 pub enum DecompressError {
+    /// Checksum mismatch.
+    #[error("Checksum mismatch.")]
+    ChecksumMismatch,
     /// An IO error occurred.
     #[error("I/O error: {0}")]
     IOError(io::Error),
@@ -136,11 +139,13 @@ where
 {
     let mut all_data = vec![];
     let mut decompressed_data = vec![];
+    // This is a checksum of all block checksums.
+    let mut stream_checksum: u32 = 0;
     data.read_to_end(&mut all_data)?;
 
     let un_file_data = file_format::decode(&all_data)?;
 
-    for block in &un_file_data {
+    for block in un_file_data.blocks() {
         let un_huffman_data = huffman::decode(block.symbols());
         let un_rle2 = rle2::decode(&un_huffman_data);
         let un_move_to_front_data = move_to_front::decode(&un_rle2, block.symbol_stack());
@@ -149,7 +154,19 @@ where
             block.origin_pointer(),
         ))?;
         let mut un_rle_data = rle1::decode(&un_burrows_wheeler_data)?;
+        let checksum = bzip_crc32(0, &un_rle_data);
+
+        if checksum != block.checksum() {
+            return Err(DecompressError::ChecksumMismatch);
+        }
+
+        stream_checksum = checksum ^ stream_checksum.rotate_left(1);
+
         decompressed_data.append(&mut un_rle_data);
+    }
+
+    if stream_checksum != un_file_data.checksum() {
+        return Err(DecompressError::ChecksumMismatch);
     }
 
     let cursor = Cursor::new(decompressed_data);

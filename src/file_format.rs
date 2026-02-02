@@ -375,12 +375,24 @@ struct BZipFile {
 }
 
 #[derive(Debug)]
-struct BZipStream {
+pub(crate) struct BZipStream {
     header: StreamHeader,
     // Bring these back when we are ready for them, which the universe will reveal in time
     // (spacetime).
     blocks: Vec<StreamBlock>,
     footer: StreamFooter,
+}
+
+impl BZipStream {
+    /// Return the blocks for the stream.
+    pub(crate) fn blocks(&self) -> &[StreamBlock] {
+        &self.blocks
+    }
+
+    /// Return the checksum from the stream footer.
+    pub(crate) fn checksum(&self) -> u32 {
+        self.footer.crc.0
+    }
 }
 
 #[derive(Debug)]
@@ -398,6 +410,10 @@ pub(crate) struct StreamBlock {
 }
 
 impl StreamBlock {
+    pub(crate) fn checksum(&self) -> u32 {
+        self.header.crc.0
+    }
+
     pub(crate) fn symbols(&self) -> &[Symbol] {
         &self.data.0
     }
@@ -409,6 +425,34 @@ impl StreamBlock {
     pub(crate) fn symbol_stack(&self) -> SymbolStack {
         self.trees.sym_map.symbol_stack()
     }
+}
+
+/// Calculate the "bzip2" crc32 of the given data.
+///
+/// In bzip2, each byte in `data` has its bits reversed, then the crc is calculated on that, and
+/// then the crc's bits are also reversed.
+///
+/// You can call this repeatedly with slices to update the crc by passing in the crc from the
+/// previous slice. For the first slice, use `0` as the `crc` value.
+///
+/// In the pdf, this is described in section 2.2.3.1.
+pub(crate) fn bzip_crc32(mut crc: u32, data: &[u8]) -> u32 {
+    const CHUNK_SIZE: usize = 4096;
+    crc = crc.reverse_bits();
+
+    for chunk in data.chunks(CHUNK_SIZE) {
+        let mut chunk_copy = [0; CHUNK_SIZE];
+        let mut chunk_copy = &mut chunk_copy[..chunk.len()];
+        chunk_copy.clone_from_slice(chunk);
+
+        chunk_copy.iter_mut().for_each(|byte| {
+            *byte = byte.reverse_bits();
+        });
+
+        crc = crc_thirty_too::update_crc(crc, chunk_copy);
+    }
+
+    crc.reverse_bits()
 }
 
 /// This is used with the move to front transform.
@@ -550,13 +594,13 @@ struct Padding(Vec<bitstream::Bit>);
 
 // =============================================================================
 
-pub fn decode(bytes: &[u8]) -> Result<Vec<StreamBlock>, DecodeError> {
+pub fn decode(bytes: &[u8]) -> Result<BZipStream, DecodeError> {
     let mut stream = bitstream::Bitstream::new(bytes);
     let mut parser = Parser::new(stream);
 
     let bzip_file = parser.parse()?;
 
-    Ok(bzip_file.stream.blocks)
+    Ok(bzip_file.stream)
 }
 
 /// The block size of the uncompressed data, in bytes.
@@ -623,6 +667,46 @@ fn crc32(bytes: &[u8]) -> Result<(u32, &[u8]), DecodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test [`bzip_crc32`].
+    mod test_bzip_crc32 {
+        use crc_thirty_too::crc;
+
+        use super::*;
+
+        #[test]
+        fn hand_reversed() {
+            let data = [0b00001111, 0b11000000, 0b10101010];
+
+            let actual = bzip_crc32(0, &data);
+
+            let reversed_data = [0b11110000, 0b00000011, 0b01010101];
+            let unreversed_crc = crc_thirty_too::crc(&reversed_data);
+            let expected = unreversed_crc.reverse_bits();
+            assert_eq!(actual, expected);
+        }
+
+        /// This is a test case from an example in the PDF given in section 2.2.3.1.
+        #[test]
+        fn pdf_example() {
+            let data = b"Hello, world!";
+
+            let actual = bzip_crc32(0, data);
+
+            assert_eq!(actual, 0x8e9a7706);
+        }
+
+        /// Test that the crc is updateable.
+        #[test]
+        fn updateable() {
+            let data = b"Hello, world!";
+
+            let first_pass = bzip_crc32(0, &data[..6]);
+            let actual = bzip_crc32(first_pass, &data[6..]);
+
+            assert_eq!(actual, 0x8e9a7706);
+        }
+    }
 
     /// Test the Parser
     mod parser {
