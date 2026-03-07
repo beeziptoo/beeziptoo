@@ -271,9 +271,10 @@ where
             }
 
             let terminator: u8 = self.bitstream.get_integer(1)?;
-            if terminator != 0 {
-                return Err(DecodeError::InvalidTree);
-            }
+            debug_assert!(
+                terminator == 0,
+                "We know that the next bit wasn't 1 because the while loop above terminated"
+            );
 
             bit_lengths.push(initial_bit_length);
         }
