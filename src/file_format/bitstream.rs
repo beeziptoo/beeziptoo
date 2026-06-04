@@ -4,6 +4,8 @@ use std::{
     slice,
 };
 
+use thiserror;
+
 /// A bit.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) enum Bit {
@@ -275,6 +277,18 @@ where
     }
 }
 
+#[derive(Debug)]
+pub(super) struct BitWriterCloseError {
+    buffer: u8,
+    error: io::Error,
+}
+
+impl BitWriterCloseError {
+    fn new(buffer: u8, error: io::Error) -> BitWriterCloseError {
+        Self { buffer, error }
+    }
+}
+
 pub(crate) struct Bitwriter<W>
 // This is a rare place where it's required to bound the struct definition with a trait. It is
 // forbidden to implement `Drop` for a specialization of a generic type.
@@ -285,7 +299,10 @@ where
     inner: W,
 
     /// The current byte being written.
-    buffer: u8,
+    ///
+    /// This will be `None` when there are no bits to write, such as when we are newly constructed
+    /// or have just written the buffer to the inner and haven't received another bit since then.
+    buffer: Option<u8>,
 
     /// The index of the bit that's about to be written to.
     ///
@@ -299,6 +316,7 @@ where
     bit_pointer: u8,
 }
 
+// TODONEXT: write_bits()
 impl<W> Bitwriter<W>
 where
     W: Write,
@@ -307,13 +325,13 @@ where
     pub(super) fn new(inner: W) -> Self {
         Self {
             inner,
-            buffer: 0,
+            buffer: None,
             bit_pointer: 7,
         }
     }
 
     /// Copy the buffer.
-    pub(super) fn buffer(&self) -> u8 {
+    pub(super) fn buffer(&self) -> Option<u8> {
         self.buffer
     }
 
@@ -322,10 +340,34 @@ where
     /// If this function returns `Ok(0)`, then the last byte was not written to the writer. This
     /// is consistent with the standard libary, but it does mean that the last byte is lost. If
     /// this is not desirable, save the buffer before calling `close()`.
-    pub(super) fn close(mut self) -> io::Result<usize> {
-        self.bit_pointer = u8::MAX;
-        let buffer = slice::from_ref(&self.buffer);
-        self.inner.write(buffer)
+    pub(super) fn close(mut self) -> Result<(), BitWriterCloseError> {
+        self.close_common()
+    }
+
+    /// Common closing code to be shared between [`close`] and [`drop`].
+    fn close_common(&mut self) -> Result<(), BitWriterCloseError> {
+        match self.buffer.take() {
+            Some(buffer) => {
+                let buffer_slice = slice::from_ref(&buffer);
+
+                let r = self
+                    .inner
+                    .write(buffer_slice)
+                    .map_err(|e| BitWriterCloseError::new(buffer, e))?;
+                if r == 0 {
+                    return Err(BitWriterCloseError::new(
+                        buffer,
+                        io::Error::other("write() unexpectedly returned 0 bytes written"),
+                    ));
+                }
+                self.inner
+                    .flush()
+                    .map_err(|e| BitWriterCloseError::new(buffer, e))?;
+
+                Ok(())
+            }
+            None => Ok(()),
+        }
     }
 }
 
@@ -334,11 +376,7 @@ where
     W: Write,
 {
     fn drop(&mut self) {
-        if self.bit_pointer != u8::MAX {
-            let buffer = slice::from_ref(&self.buffer);
-            // we ignore a failed write in drop
-            let _r = self.inner.write(buffer);
-        }
+        let _ = self.close_common();
     }
 }
 
@@ -651,22 +689,37 @@ mod tests {
 mod writer_tests {
     use super::*;
 
-    #[test]
-    fn close() {
-        let mut output = vec![];
-        let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
-        writer.buffer = 5;
+    mod close {
+        use super::*;
 
-        assert_eq!(writer.close().unwrap(), 1);
+        #[test]
+        fn close() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+            writer.buffer = Some(5);
 
-        assert_eq!(&output, &[5]);
+            writer.close().unwrap();
+
+            assert_eq!(&output, &[5]);
+        }
+
+        /// Closing a new writer shouldn't write anything.
+        #[test]
+        fn new() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+
+            writer.close().unwrap();
+
+            assert_eq!(&output, &[]);
+        }
     }
 
     #[test]
     fn drop() {
         let mut output = vec![];
         let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
-        writer.buffer = 5;
+        writer.buffer = Some(5);
 
         std::mem::drop(writer);
 
