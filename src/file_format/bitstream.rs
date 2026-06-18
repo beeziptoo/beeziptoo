@@ -40,13 +40,25 @@ impl<R> fmt::Debug for Bitstream<R> {
     }
 }
 
-pub trait FromBits {
+pub trait Bits {
     fn from_bits(value: &[Bit]) -> Self;
+    fn to_bits(self, num_bits: u8) -> OwnedBits;
+}
+
+pub struct OwnedBits {
+    bits: [Bit; 64],
+    size: u8,
+}
+
+impl OwnedBits {
+    fn as_slice(&self) -> &[Bit] {
+        &self.bits[..self.size.into()]
+    }
 }
 
 macro_rules! impl_from_bits {
     ($kind:ty, $size:expr) => {
-        impl FromBits for $kind {
+        impl Bits for $kind {
             fn from_bits(value: &[Bit]) -> Self {
                 debug_assert!(
                     value.len() <= $size,
@@ -74,6 +86,35 @@ macro_rules! impl_from_bits {
                 }
 
                 x
+            }
+
+            fn to_bits(mut self, num_bits: u8) -> OwnedBits {
+                debug_assert!(
+                    num_bits <= $size,
+                    concat!("Cannot convert ", stringify!($kind), " into {} bits"),
+                    num_bits
+                );
+
+                let mut bits = OwnedBits {
+                    bits: [Bit::Zero; 64],
+                    size: num_bits,
+                };
+
+                if num_bits == 0 {
+                    return bits;
+                }
+
+                let mut bits_pointer = num_bits - 1;
+
+                loop {
+                    let idx: usize = bits_pointer.into();
+                    bits.bits[idx] = if self & 1 == 1 { Bit::One } else { Bit::Zero };
+                    self >>= 1;
+                    if bits_pointer == 0 {
+                        break bits;
+                    }
+                    bits_pointer -= 1;
+                }
             }
         }
     };
@@ -112,7 +153,7 @@ where
 
     pub(super) fn get_integer<T>(&mut self, num_bits_to_read: u8) -> io::Result<T>
     where
-        T: FromBits,
+        T: Bits,
     {
         let bits: Vec<Bit> = (0..num_bits_to_read)
             .map(|_| self.get_next_bit())
@@ -127,7 +168,7 @@ where
     /// mode, this will return a `0`.
     pub(super) fn peek_integer<T>(&mut self, num_bits_to_read: u8) -> io::Result<T>
     where
-        T: FromBits,
+        T: Bits,
     {
         let Peek { bits, .. } = self.peek_n_bits(num_bits_to_read.into())?;
 
@@ -724,5 +765,39 @@ mod writer_tests {
         std::mem::drop(writer);
 
         assert_eq!(&output, &[5]);
+    }
+}
+
+#[cfg(test)]
+mod bits_tests {
+    use super::*;
+
+    #[test]
+    fn to_bits() {
+        let x = 2_u8.to_bits(3);
+        assert_eq!(x.as_slice(), &[Bit::Zero, Bit::One, Bit::Zero]);
+        let x = 2_u8.to_bits(0);
+        assert_eq!(x.as_slice(), &[]);
+        let x = 2_u8.to_bits(8);
+        assert_eq!(
+            x.as_slice(),
+            &[
+                Bit::Zero,
+                Bit::Zero,
+                Bit::Zero,
+                Bit::Zero,
+                Bit::Zero,
+                Bit::Zero,
+                Bit::One,
+                Bit::Zero
+            ]
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn to_bits_fail() {
+        let x = 2_u8.to_bits(9);
     }
 }
