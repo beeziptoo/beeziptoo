@@ -4,8 +4,6 @@ use std::{
     slice,
 };
 
-use thiserror;
-
 /// A bit.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) enum Bit {
@@ -16,7 +14,7 @@ pub(crate) enum Bit {
 const BUFFER_SIZE: usize = 512;
 
 /// An adapter over a reader that turns a byte slice into an iterator of bits.
-pub(crate) struct Bitstream<R> {
+pub(crate) struct Bitreader<R> {
     /// The reader.
     inner: R,
     /// The bytes we've read which still need handling.
@@ -30,9 +28,9 @@ pub(crate) struct Bitstream<R> {
     bit_pointer: u8,
 }
 
-impl<R> fmt::Debug for Bitstream<R> {
+impl<R> fmt::Debug for Bitreader<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Bitstream")
+        f.debug_struct("Bitreader")
             .field("buffer_size", &self.buffer_size)
             .field("buffer_pointer", &self.buffer_pointer)
             .field("bit_pointer", &self.bit_pointer)
@@ -56,7 +54,7 @@ impl OwnedBits {
     }
 }
 
-macro_rules! impl_from_bits {
+macro_rules! impl_bits {
     ($kind:ty, $size:expr) => {
         impl Bits for $kind {
             fn from_bits(value: &[Bit]) -> Self {
@@ -120,10 +118,10 @@ macro_rules! impl_from_bits {
     };
 }
 
-impl_from_bits!(u8, 8);
-impl_from_bits!(u16, 16);
-impl_from_bits!(u32, 32);
-impl_from_bits!(u64, 64);
+impl_bits!(u8, 8);
+impl_bits!(u16, 16);
+impl_bits!(u32, 32);
+impl_bits!(u64, 64);
 
 /// TODO
 #[derive(Clone, Debug)]
@@ -137,12 +135,12 @@ struct Peek {
     new_bit_pointer: u8,
 }
 
-impl<R> Bitstream<R>
+impl<R> Bitreader<R>
 where
     R: Read,
 {
-    pub(crate) fn new(inner: R) -> Bitstream<R> {
-        Bitstream {
+    pub(crate) fn new(inner: R) -> Bitreader<R> {
+        Bitreader {
             inner,
             buffer: Box::new([0; 512]),
             buffer_size: 0,
@@ -294,16 +292,16 @@ where
     }
 }
 
-impl<R> From<R> for Bitstream<R>
+impl<R> From<R> for Bitreader<R>
 where
     R: Read,
 {
     fn from(value: R) -> Self {
-        Bitstream::new(value)
+        Bitreader::new(value)
     }
 }
 
-impl<R> Iterator for Bitstream<R>
+impl<R> Iterator for Bitreader<R>
 where
     R: Read,
 {
@@ -357,7 +355,6 @@ where
     bit_pointer: u8,
 }
 
-// TODONEXT: write_bits()
 impl<W> Bitwriter<W>
 where
     W: Write,
@@ -410,6 +407,57 @@ where
             None => Ok(()),
         }
     }
+
+    /// Write `n` bits from the given integer to the stream.
+    ///
+    /// The `n` lowest order bits will be written in the integer. As an example, if you provide
+    /// `7_u8` as the byte to write, and set `n` to `4`, the bits `0111` will be written to the
+    /// stream.
+    pub(super) fn write_bits<T>(&mut self, value: T, n: u8) -> io::Result<()>
+    where
+        T: Bits,
+    {
+        debug_assert!(
+            (n as usize) <= std::mem::size_of::<T>() * 8,
+            "Cannot store {n} bits in a {}",
+            stringify!(T)
+        );
+
+        let bits = value.to_bits(n);
+
+        for bit in bits.as_slice() {
+            self.push_bit(bit)?;
+        }
+
+        Ok(())
+    }
+
+    /// Push one bit into the buffer.
+    fn push_bit(&mut self, bit: &Bit) -> io::Result<()> {
+        let buffer = self.buffer.get_or_insert_with(|| {
+            self.bit_pointer = 7;
+
+            0
+        });
+
+        if matches!(bit, Bit::One) {
+            let mask = 1 << self.bit_pointer;
+
+            *buffer |= mask;
+        }
+
+        if self.bit_pointer == 0 {
+            // Flush
+            self.inner.write_all(&[*buffer])?;
+
+            self.bit_pointer = 7;
+            self.buffer = None;
+        } else {
+            self.bit_pointer -= 1;
+        }
+
+        Ok(())
+    }
 }
 
 impl<W> Drop for Bitwriter<W>
@@ -429,7 +477,7 @@ mod tests {
     fn simple() {
         let input: &[u8] = &[10];
 
-        let bitstream = Bitstream::new(input);
+        let bitstream = Bitreader::new(input);
 
         let output: io::Result<Vec<Bit>> = bitstream.collect();
 
@@ -451,7 +499,7 @@ mod tests {
     #[test]
     fn get_integer() {
         let input: [u8; 4] = 0x0074740e_u32.to_be_bytes();
-        let mut bitstream = Bitstream::new(&input[..]);
+        let mut bitstream = Bitreader::new(&input[..]);
 
         let value: u32 = bitstream.get_integer(24).expect("This should fit in a u32");
 
@@ -464,7 +512,7 @@ mod tests {
     fn get_padding() {
         let input: &[u8] = &[10];
 
-        let mut bitstream = Bitstream::new(input);
+        let mut bitstream = Bitreader::new(input);
         let _: u8 = bitstream.get_integer(4).unwrap();
 
         assert_eq!(
@@ -483,7 +531,7 @@ mod tests {
         #[test]
         fn last_byte() {
             let input: Vec<u8> = (0..BUFFER_SIZE * 2).map(|v| (v % 256) as u8).collect();
-            let mut bitstream = Bitstream::new(input.as_slice());
+            let mut bitstream = Bitreader::new(input.as_slice());
             // Let's set the state such that we have read all but the last byte in the buffer.
             (0..BUFFER_SIZE - 1)
                 .map(|_| bitstream.get_integer::<u8>(8))
@@ -504,7 +552,7 @@ mod tests {
         #[test]
         fn third_to_last_byte() {
             let input: Vec<u8> = (0..BUFFER_SIZE * 2).map(|v| (v % 256) as u8).collect();
-            let mut bitstream = Bitstream::new(input.as_slice());
+            let mut bitstream = Bitreader::new(input.as_slice());
             // Let's set the state such that we have read all but the last byte in the buffer.
             (0..BUFFER_SIZE - 3)
                 .map(|_| bitstream.get_integer::<u8>(8))
@@ -527,39 +575,39 @@ mod tests {
 
         #[test]
         fn empty() {
-            let bs = Bitstream::new(&b""[..]);
+            let bs = Bitreader::new(&b""[..]);
             assert_eq!(bs.bits_in_buffer(), 0);
         }
 
         #[test]
         fn two_read() {
-            let mut bs = Bitstream::new(&b"\x01\x10"[..]);
+            let mut bs = Bitreader::new(&b"\x01\x10"[..]);
             let _ = bs.get_integer::<u16>(2);
             assert_eq!(bs.bits_in_buffer(), 14);
         }
 
         #[test]
         fn one_left() {
-            let mut bs = Bitstream::new(&b"\x01\x10"[..]);
+            let mut bs = Bitreader::new(&b"\x01\x10"[..]);
             let _ = bs.get_integer::<u16>(15);
             assert_eq!(bs.bits_in_buffer(), 1);
         }
 
         #[test]
         fn fully_read() {
-            let mut bs = Bitstream::new(&b"\x01\x10"[..]);
+            let mut bs = Bitreader::new(&b"\x01\x10"[..]);
             let _ = bs.get_integer::<u16>(16);
             assert_eq!(bs.bits_in_buffer(), 0);
         }
     }
 
-    /// Test [`Bitstream::peek_integer`].
+    /// Test [`Bitreader::peek_integer`].
     mod peek_integer {
         use super::*;
 
         #[test]
         fn empty() {
-            let mut bs = Bitstream::new(&b""[..]);
+            let mut bs = Bitreader::new(&b""[..]);
 
             let result: io::Result<u8> = bs.peek_integer(1);
 
@@ -570,7 +618,7 @@ mod tests {
         #[should_panic = "Cannot build a u8 out of 0 bits"]
         #[cfg(debug_assertions)]
         fn zero() {
-            let mut bs = Bitstream::new(&b""[..]);
+            let mut bs = Bitreader::new(&b""[..]);
 
             let res: u8 = bs.peek_integer(0).unwrap();
         }
@@ -578,7 +626,7 @@ mod tests {
         #[test]
         #[cfg(not(debug_assertions))]
         fn zero() {
-            let mut bs = Bitstream::new(&b""[..]);
+            let mut bs = Bitreader::new(&b""[..]);
 
             let res: u8 = bs.peek_integer(0).unwrap();
 
@@ -588,7 +636,7 @@ mod tests {
 
         #[test]
         fn one() {
-            let mut bs = Bitstream::new(&b"\x80"[..]);
+            let mut bs = Bitreader::new(&b"\x80"[..]);
 
             let result: u8 = bs.peek_integer(1).unwrap();
 
@@ -597,7 +645,7 @@ mod tests {
 
         #[test]
         fn two() {
-            let mut bs = Bitstream::new(&b"\x80"[..]);
+            let mut bs = Bitreader::new(&b"\x80"[..]);
 
             let result: u8 = bs.peek_integer(2).unwrap();
 
@@ -606,7 +654,7 @@ mod tests {
 
         #[test]
         fn cross_boundary() {
-            let mut bs = Bitstream::new(&b"\x80\x80"[..]);
+            let mut bs = Bitreader::new(&b"\x80\x80"[..]);
             let _ = bs.get_integer::<u8>(7);
 
             let result: u8 = bs.peek_integer(2).unwrap();
@@ -616,7 +664,7 @@ mod tests {
 
         #[test]
         fn last() {
-            let mut bs = Bitstream::new(&b"\x00\x01"[..]);
+            let mut bs = Bitreader::new(&b"\x00\x01"[..]);
             let _ = bs.get_integer::<u16>(15);
 
             let result: u8 = bs.peek_integer(1).unwrap();
@@ -626,7 +674,7 @@ mod tests {
 
         #[test]
         fn error_beyond_end() {
-            let mut bs = Bitstream::new(&b"\x00"[..]);
+            let mut bs = Bitreader::new(&b"\x00"[..]);
             let _ = bs.get_integer::<u8>(8);
 
             let result: io::Result<u8> = bs.peek_integer(1);
@@ -640,7 +688,7 @@ mod tests {
 
         #[test]
         fn empty() {
-            let mut bs = Bitstream::new(&b""[..]);
+            let mut bs = Bitreader::new(&b""[..]);
             assert_eq!(
                 bs.peek_n_bits(1).unwrap_err().kind(),
                 io::ErrorKind::UnexpectedEof
@@ -649,7 +697,7 @@ mod tests {
 
         #[test]
         fn zero() {
-            let mut bs = Bitstream::new(&b""[..]);
+            let mut bs = Bitreader::new(&b""[..]);
             assert_eq!(
                 bs.peek_n_bits(0).unwrap(),
                 Peek {
@@ -662,7 +710,7 @@ mod tests {
 
         #[test]
         fn one() {
-            let mut bs = Bitstream::new(&b"\x80"[..]);
+            let mut bs = Bitreader::new(&b"\x80"[..]);
             assert_eq!(
                 bs.peek_n_bits(1).unwrap(),
                 Peek {
@@ -675,7 +723,7 @@ mod tests {
 
         #[test]
         fn two() {
-            let mut bs = Bitstream::new(&b"\x80"[..]);
+            let mut bs = Bitreader::new(&b"\x80"[..]);
             assert_eq!(
                 bs.peek_n_bits(2).unwrap(),
                 Peek {
@@ -688,7 +736,7 @@ mod tests {
 
         #[test]
         fn cross_boundary() {
-            let mut bs = Bitstream::new(&b"\x80\x80"[..]);
+            let mut bs = Bitreader::new(&b"\x80\x80"[..]);
             let _ = bs.get_integer::<u8>(7);
             assert_eq!(
                 bs.peek_n_bits(2).unwrap(),
@@ -702,7 +750,7 @@ mod tests {
 
         #[test]
         fn last() {
-            let mut bs = Bitstream::new(&b"\x00\x01"[..]);
+            let mut bs = Bitreader::new(&b"\x00\x01"[..]);
             let _ = bs.get_integer::<u16>(15);
             assert_eq!(
                 bs.peek_n_bits(1).unwrap(),
@@ -716,7 +764,7 @@ mod tests {
 
         #[test]
         fn error_beyond_end() {
-            let mut bs = Bitstream::new(&b"\x00"[..]);
+            let mut bs = Bitreader::new(&b"\x00"[..]);
             let _ = bs.get_integer::<u8>(8);
             assert_eq!(
                 bs.peek_n_bits(1).unwrap_err().kind(),
@@ -765,6 +813,170 @@ mod writer_tests {
         std::mem::drop(writer);
 
         assert_eq!(&output, &[5]);
+    }
+
+    /// Test push_bit.
+    mod push_bit {
+        use super::*;
+
+        /// Test pushing a `0` on a writer in an about-to-flush state.
+        #[test]
+        fn flush_0() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+
+            writer.push_bit(&Bit::Zero);
+
+            assert_eq!(writer.bit_pointer, 7);
+            assert_eq!(writer.buffer, None);
+            std::mem::drop(writer);
+            assert_eq!(output, [0b0110_0100]);
+        }
+
+        /// Test pushing a `1` on a writer in an about-to-flush state.
+        #[test]
+        fn flush_1() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+
+            writer.push_bit(&Bit::One);
+
+            assert_eq!(writer.bit_pointer, 7);
+            assert_eq!(writer.buffer, None);
+            std::mem::drop(writer);
+            assert_eq!(output, [0b0110_0101]);
+        }
+
+        /// Test pushing a `0` on a writer in an intermediate state.
+        #[test]
+        fn intermediate_0() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+
+            writer.push_bit(&Bit::Zero);
+
+            assert_eq!(writer.bit_pointer, 2);
+            assert_eq!(writer.buffer, Some(0b0110_0000));
+            std::mem::drop(writer);
+            assert_eq!(output, [0b0110_0000]);
+        }
+
+        /// Test pushing a `1` on a writer in an intermediate state.
+        #[test]
+        fn intermediate_1() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+
+            writer.push_bit(&Bit::One);
+
+            assert_eq!(writer.bit_pointer, 2);
+            assert_eq!(writer.buffer, Some(0b0110_1000));
+            std::mem::drop(writer);
+            assert_eq!(output, [0b0110_1000]);
+        }
+
+        /// Test pushing a `0` on a new writer.
+        #[test]
+        fn new_0() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+
+            writer.push_bit(&Bit::Zero);
+
+            assert_eq!(writer.bit_pointer, 6);
+            assert_eq!(writer.buffer, Some(0));
+            std::mem::drop(writer);
+            assert_eq!(output, [0]);
+        }
+
+        /// Test pushing a `1` on a new writer.
+        #[test]
+        fn new_1() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+
+            writer.push_bit(&Bit::One);
+
+            assert_eq!(writer.bit_pointer, 6);
+            assert_eq!(writer.buffer, Some(128));
+            std::mem::drop(writer);
+            assert_eq!(output, [128]);
+        }
+    }
+
+    /// Test [`Bitwriter::write_bits`].
+    mod write_bits {
+        use super::*;
+
+        /// Test 0xcafe_babe but only 16 bits on an intermediate-state `Bitwriter`.
+        #[test]
+        fn intermediate_cafe_babe_16() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+            writer.push_bit(&Bit::Zero);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::One);
+            writer.push_bit(&Bit::Zero);
+
+            writer.write_bits(0xcafe_babe_u32, 16).unwrap();
+
+            assert_eq!(writer.bit_pointer, 3);
+            assert_eq!(writer.buffer, Some(0xe << 4));
+            std::mem::drop(writer);
+            // This is the 0110, followed by 0xbabe, but remember the final e will be shifted to
+            // the top bits.
+            assert_eq!(output, [0b0110_1011, 0xab, 0xe << 4]);
+        }
+
+        /// Test 0xcafe_babe but only 16 bits on a new `Bitwriter`.
+        #[test]
+        fn new_cafe_babe_16() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+
+            writer.write_bits(0xcafe_babe_u32, 16).unwrap();
+
+            assert_eq!(writer.bit_pointer, 7);
+            assert_eq!(writer.buffer, None);
+            std::mem::drop(writer);
+            assert_eq!(output, [0xba, 0xbe]);
+        }
+
+        /// Test 0xcafe_babe but only 32 bits on a new `Bitwriter`.
+        #[test]
+        fn new_cafe_babe_32() {
+            let mut output = vec![];
+            let mut writer: Bitwriter<&mut Vec<u8>> = Bitwriter::new(&mut output);
+
+            writer.write_bits(0xcafe_babe_u32, 32).unwrap();
+
+            assert_eq!(writer.bit_pointer, 7);
+            assert_eq!(writer.buffer, None);
+            std::mem::drop(writer);
+            assert_eq!(output, [0xca, 0xfe, 0xba, 0xbe]);
+        }
     }
 }
 
