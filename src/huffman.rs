@@ -2,8 +2,9 @@
 
 use std::collections::{BinaryHeap, HashMap};
 
+use bitstream_too::Bitreader;
+
 use super::rle2;
-use crate::file_format::bitstream::Bitreader;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -73,7 +74,7 @@ impl From<&Symbol> for rle2::Symbol {
 }
 
 pub(crate) mod tree {
-    use crate::file_format::bitstream::Bit;
+    use bitstream_too::Bit;
 
     use super::*;
 
