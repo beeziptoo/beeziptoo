@@ -2,8 +2,9 @@
 
 use std::collections::{BinaryHeap, HashMap};
 
+use bitstream_too::Bitreader;
+
 use super::rle2;
-use crate::file_format::bitstream::Bitstream;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -73,7 +74,7 @@ impl From<&Symbol> for rle2::Symbol {
 }
 
 pub(crate) mod tree {
-    use crate::file_format::bitstream::Bit;
+    use bitstream_too::Bit;
 
     use super::*;
 
@@ -168,7 +169,7 @@ pub(crate) mod tree {
         }
 
         /// Decode one `Symbol` from the `bitstream`.
-        pub(crate) fn decode<R>(&self, bitstream: &mut Bitstream<R>) -> Result<Symbol, Error>
+        pub(crate) fn decode<R>(&self, bitstream: &mut Bitreader<R>) -> Result<Symbol, Error>
         where
             R: Read,
         {
@@ -427,28 +428,28 @@ pub(crate) mod tree {
                 let tree: Tree = symbol_lengths.try_into().unwrap();
 
                 assert_eq!(
-                    tree.decode(&mut Bitstream::new(&[0_u8][..])).unwrap(),
+                    tree.decode(&mut Bitreader::new(&[0_u8][..])).unwrap(),
                     Symbol::RunA
                 );
                 assert_eq!(
-                    tree.decode(&mut Bitstream::new(&[160_u8][..])).unwrap(),
+                    tree.decode(&mut Bitreader::new(&[160_u8][..])).unwrap(),
                     Symbol::RunB
                 );
                 assert_eq!(
-                    tree.decode(&mut Bitstream::new(&[176_u8][..])).unwrap(),
+                    tree.decode(&mut Bitreader::new(&[176_u8][..])).unwrap(),
                     Symbol::Byte(4)
                 );
                 assert_eq!(
-                    tree.decode(&mut Bitstream::new(&[255_u8, 128_u8][..]))
+                    tree.decode(&mut Bitreader::new(&[255_u8, 128_u8][..]))
                         .unwrap(),
                     Symbol::Byte(15)
                 );
                 assert_eq!(
-                    tree.decode(&mut Bitstream::new(&[252_u8][..])).unwrap(),
+                    tree.decode(&mut Bitreader::new(&[252_u8][..])).unwrap(),
                     Symbol::Byte(17)
                 );
                 assert_eq!(
-                    tree.decode(&mut Bitstream::new(&[254_u8][..])).unwrap(),
+                    tree.decode(&mut Bitreader::new(&[254_u8][..])).unwrap(),
                     Symbol::Eob
                 );
             }

@@ -9,12 +9,9 @@ use std::{
     num::TryFromIntError,
 };
 
-use bitstream::Bit;
+use bitstream_too::{Bit, Bitreader};
 
-use self::bitstream::Bitstream;
 use crate::huffman::{self, tree::Tree, HuffmanCodedData, Symbol};
-
-pub(crate) mod bitstream;
 
 /// Errors that can occur when decoding bzip2 streams.
 #[derive(Debug, thiserror::Error)]
@@ -74,7 +71,7 @@ impl From<huffman::tree::InvalidBitmap> for DecodeError {
 // = Parser ====================================================================
 
 struct Parser<R> {
-    bitstream: Bitstream<R>,
+    bitstream: Bitreader<R>,
 }
 
 impl<R> Parser<R>
@@ -83,7 +80,7 @@ where
 {
     fn new<B>(bitstream: B) -> Self
     where
-        B: Into<Bitstream<R>>,
+        B: Into<Bitreader<R>>,
     {
         Self {
             bitstream: bitstream.into(),
@@ -169,7 +166,7 @@ where
     }
 
     fn footer_padding(&mut self) -> Result<Padding, DecodeError> {
-        let padding: Vec<bitstream::Bit> = self.bitstream.get_padding();
+        let padding: Vec<bitstream_too::Bit> = self.bitstream.get_padding();
 
         Ok(Padding(padding))
     }
@@ -552,7 +549,7 @@ impl SymbolMap {
         // * we know we'll get exactly 16 bits out of this because we constructed an array from a
         //   `u16`.
         let l1 = self.l1.to_be_bytes();
-        let l1_reader = Bitstream::new(&l1[..]).map(Result::unwrap);
+        let l1_reader = Bitreader::new(&l1[..]).map(Result::unwrap);
 
         for (offset, l2) in l1_reader
             .enumerate()
@@ -561,7 +558,7 @@ impl SymbolMap {
             .zip(&self.l2)
         {
             let l2 = l2.to_be_bytes();
-            let l2_reader = Bitstream::new(&l2[..]).map(Result::unwrap);
+            let l2_reader = Bitreader::new(&l2[..]).map(Result::unwrap);
             for symbol in l2_reader
                 .zip(0..16)
                 .filter(|&(bit, i)| (bit == Bit::One))
@@ -591,12 +588,12 @@ struct FooterMagic;
 #[derive(Debug)]
 struct StreamCrc(u32);
 #[derive(Debug)]
-struct Padding(Vec<bitstream::Bit>);
+struct Padding(Vec<bitstream_too::Bit>);
 
 // =============================================================================
 
 pub fn decode(bytes: &[u8]) -> Result<BZipStream, DecodeError> {
-    let mut stream = bitstream::Bitstream::new(bytes);
+    let mut stream = bitstream_too::Bitreader::new(bytes);
     let mut parser = Parser::new(stream);
 
     let bzip_file = parser.parse()?;
@@ -841,7 +838,7 @@ mod tests {
         #[test]
         fn zero() {
             let mut parser = Parser {
-                bitstream: Bitstream::new(&[0x0_u8][..]),
+                bitstream: Bitreader::new(&[0x0_u8][..]),
             };
             assert_eq!(parser.selector().unwrap().0, 0);
         }
@@ -849,7 +846,7 @@ mod tests {
         #[test]
         fn one() {
             let mut parser = Parser {
-                bitstream: Bitstream::new(&[0x80][..]),
+                bitstream: Bitreader::new(&[0x80][..]),
             };
             assert_eq!(parser.selector().unwrap().0, 1);
         }
@@ -857,7 +854,7 @@ mod tests {
         #[test]
         fn two() {
             let mut parser = Parser {
-                bitstream: Bitstream::new(&[0xc0][..]),
+                bitstream: Bitreader::new(&[0xc0][..]),
             };
             assert_eq!(parser.selector().unwrap().0, 2);
         }
