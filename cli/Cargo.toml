@@ -1,6 +1,6 @@
 [package]
 name = "beeziptoo-cli"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["Andrew Halle <me@andrewhalle.dev>", "Randy Barlow <randy@electronsweatshop.com>"]
 license = "GPL-3.0"
 readme = "README.md"
@@ -14,5 +14,5 @@ rust-version = "1.89"
 
 [dependencies]
 anyhow = "1"
-beeziptoo = { version = "0.0", path = ".." }
+beeziptoo = { version = "0.1", path = ".." }
 clap = { version = "4", features = ["derive"] }
