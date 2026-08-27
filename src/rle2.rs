@@ -48,8 +48,11 @@ pub(super) fn decode(mut data: &[Symbol]) -> Vec<u8> {
 /// Breaks the input into a leading `Symbol`s and the remaining bytes.
 ///
 /// Example:
+///
+/// ```text
 /// [0, 0, 0, 1] -> ([A, A], [1])
 /// [1, 0, 0, 0] -> ([1], [0, 0, 0])
+/// ```
 fn get_symbols(input: &[u8]) -> (Vec<Symbol>, &[u8]) {
     assert!(!input.is_empty());
     if input[0] != 0 {
@@ -68,8 +71,11 @@ fn get_symbols(input: &[u8]) -> (Vec<Symbol>, &[u8]) {
 /// Breaks the input into leading bytes and remaining unprocessed `Symbol`s.
 ///
 /// Example:
+///
+/// ```text
 /// [A, A, 1] -> ([0, 0, 0], [1])
 /// [1, A, A] -> ([1], [A, A])
+/// ```
 fn get_bytes(input: &[Symbol]) -> (Vec<u8>, &[Symbol]) {
     assert!(!input.is_empty());
     if let Symbol::Byte(byte) = input[0] {
