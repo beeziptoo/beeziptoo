@@ -39,7 +39,7 @@ assert_eq!(std::str::from_utf8(&buffer).unwrap(), peter_piper);
 ## Project status
 
 `beeziptoo` currently supports decompression, and should be able to handle any
-`bzip2` file. There are still a few undone TODOs, such as CRC checking.
+`bzip2` file. There are still a few undone TODOs.
 
 It does not yet support compression (see
 <https://github.com/bowlofeggs/beeziptoo/issues/23>). Much of the compression

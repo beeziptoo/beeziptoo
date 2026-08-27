@@ -134,7 +134,6 @@ where
     fn stream_footer(&mut self) -> Result<StreamFooter, DecodeError> {
         Ok(StreamFooter {
             magic: self.footer_magic()?,
-            // TODO: Check the crc
             crc: self.stream_crc()?,
             padding: self.footer_padding()?,
         })
@@ -645,21 +644,6 @@ fn bcd_pi(bytes: &[u8]) -> Result<&[u8], DecodeError> {
         [0x31, 0x41, 0x59, 0x26, 0x53, 0x59, rest @ ..] => Ok(rest),
         _ => Err(DecodeError::InvalidBlockHeader),
     }
-}
-
-// TODO: CRC32 needs to be validated somewhere.
-//
-// This might be a free function, or it might be a method on a hypothetical `Block` type.
-
-fn crc32(bytes: &[u8]) -> Result<(u32, &[u8]), DecodeError> {
-    if bytes.len() < 4 {
-        return Err(DecodeError::unexpected_eof("there were fewer than 4 bytes"));
-    }
-
-    let (crc, rest) = bytes.split_at(4);
-    // TODO: Figure out if little-endian is the correct endianness.
-    let crc = u32::from_le_bytes(crc.try_into().unwrap());
-    Ok((crc, rest))
 }
 
 #[cfg(test)]

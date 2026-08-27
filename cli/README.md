@@ -15,7 +15,7 @@ $ beeziptoo-cli example.bz2 example
 ## Project status
 
 `beeziptoo-cli` currently supports decompression, and should be able to handle
-any `bzip2` file. There are still a few undone TODOs, such as CRC checking.
+any `bzip2` file. There are still a few undone TODOs.
 
 It does not yet support compression (see
 <https://github.com/bowlofeggs/beeziptoo/issues/23>).
