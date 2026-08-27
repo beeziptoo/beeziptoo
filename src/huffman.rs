@@ -19,21 +19,19 @@ pub enum Error {
 }
 
 #[derive(Debug, Default)]
-#[expect(unused)] // TODO: Should be used when we encode.
 pub(super) struct HuffmanCodedData {
     /// This is the set of trees used in the encoded data.
-    trees: Vec<tree::Tree>,
+    _trees: Vec<tree::Tree>,
     /// This contains the encoded data.
-    blocks: Vec<HuffmanBlock>,
+    _blocks: Vec<HuffmanBlock>,
 }
 
 #[derive(Debug, Default)]
-#[expect(unused)] // TODO: Should be used when we encode.
 struct HuffmanBlock {
-    /// Points into [`HuffmanCodedData::trees`] to indicate which tree was used for this block.
-    tree_index: u8,
+    /// Points into [`HuffmanCodedData::_trees`] to indicate which tree was used for this block.
+    _tree_index: u8,
     /// This is the huffman-coded data.
-    bitvec: Vec<u8>,
+    _bitvec: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
@@ -587,13 +585,13 @@ pub(super) fn encode(data: &[rle2::Symbol]) -> HuffmanCodedData {
 
     let bits = tree.encode(data);
     let block = HuffmanBlock {
-        tree_index: 0,
-        bitvec: bits,
+        _tree_index: 0,
+        _bitvec: bits,
     };
 
     HuffmanCodedData {
-        trees: vec![tree],
-        blocks: vec![block],
+        _trees: vec![tree],
+        _blocks: vec![block],
     }
 }
 

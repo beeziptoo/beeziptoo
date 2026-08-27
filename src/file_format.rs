@@ -1,17 +1,11 @@
 // Copyright © 2023-2026 Andrew Halle and Randy Barlow
 //! Read and write the bzip2 file format.
 
-// TODO remove
-#![allow(unused)]
-
-use std::{
-    io::{self, ErrorKind, Read},
-    num::TryFromIntError,
-};
+use std::{io::Read, num::TryFromIntError};
 
 use bitstream_too::{Bit, Bitreader};
 
-use crate::huffman::{self, tree::Tree, HuffmanCodedData, Symbol};
+use crate::huffman::{self, tree::Tree, Symbol};
 
 /// Errors that can occur when decoding bzip2 streams.
 #[derive(Debug, thiserror::Error)]
@@ -56,14 +50,8 @@ pub enum DecodeError {
     InvalidTree,
 }
 
-impl DecodeError {
-    fn unexpected_eof(msg: &'static str) -> Self {
-        Self::IOError(io::Error::new(ErrorKind::UnexpectedEof, msg))
-    }
-}
-
 impl From<huffman::tree::InvalidBitmap> for DecodeError {
-    fn from(value: huffman::tree::InvalidBitmap) -> Self {
+    fn from(_value: huffman::tree::InvalidBitmap) -> Self {
         DecodeError::InvalidTree
     }
 }
@@ -124,7 +112,7 @@ where
         let footer = self.stream_footer()?;
 
         Ok(BZipStream {
-            header,
+            _header: header,
             blocks,
             footer,
         })
@@ -133,17 +121,17 @@ where
     /// Read the stream footer
     fn stream_footer(&mut self) -> Result<StreamFooter, DecodeError> {
         Ok(StreamFooter {
-            magic: self.footer_magic()?,
+            _magic: self.footer_magic()?,
             crc: self.stream_crc()?,
-            padding: self.footer_padding()?,
+            _padding: self.footer_padding()?,
         })
     }
 
     fn stream_header(&mut self) -> Result<StreamHeader, DecodeError> {
         Ok(StreamHeader {
-            magic: self.header_magic()?,
-            version: self.version()?,
-            level: self.level()?,
+            _magic: self.header_magic()?,
+            _version: self.version()?,
+            _level: self.level()?,
         })
     }
 
@@ -167,7 +155,7 @@ where
     fn footer_padding(&mut self) -> Result<Padding, DecodeError> {
         let padding: Vec<bitstream_too::Bit> = self.bitstream.get_padding();
 
-        Ok(Padding(padding))
+        Ok(Padding { _padding: padding })
     }
 
     fn header_magic(&mut self) -> Result<HeaderMagic, DecodeError> {
@@ -194,7 +182,9 @@ where
             return Err(DecodeError::InvalidBlockSize);
         }
 
-        Ok(Level(level - b'1' + 1))
+        Ok(Level {
+            _level: level - b'1' + 1,
+        })
     }
 
     fn next_block(&mut self) -> Result<Option<StreamBlock>, DecodeError> {
@@ -226,9 +216,11 @@ where
         }
 
         Ok(BlockHeader {
-            magic: BlockMagic(magic),
+            _magic: BlockMagic { _magic: magic },
             crc: BlockCrc(crc),
-            randomized: Randomized(randomized),
+            _randomized: Randomized {
+                _randomized: randomized,
+            },
             orig_ptr: OriginPointer(origin_pointer),
         })
     }
@@ -373,7 +365,7 @@ struct BZipFile {
 
 #[derive(Debug)]
 pub(crate) struct BZipStream {
-    header: StreamHeader,
+    _header: StreamHeader,
     // Bring these back when we are ready for them, which the universe will reveal in time
     // (spacetime).
     blocks: Vec<StreamBlock>,
@@ -394,9 +386,9 @@ impl BZipStream {
 
 #[derive(Debug)]
 struct StreamHeader {
-    magic: HeaderMagic,
-    version: Version,
-    level: Level,
+    _magic: HeaderMagic,
+    _version: Version,
+    _level: Level,
 }
 
 #[derive(Debug)]
@@ -439,7 +431,7 @@ pub(crate) fn bzip_crc32(mut crc: u32, data: &[u8]) -> u32 {
 
     for chunk in data.chunks(CHUNK_SIZE) {
         let mut chunk_copy = [0; CHUNK_SIZE];
-        let mut chunk_copy = &mut chunk_copy[..chunk.len()];
+        let chunk_copy = &mut chunk_copy[..chunk.len()];
         chunk_copy.clone_from_slice(chunk);
 
         chunk_copy.iter_mut().for_each(|byte| {
@@ -459,9 +451,9 @@ pub(crate) struct SymbolStack(pub(crate) Vec<u8>);
 
 #[derive(Debug)]
 struct BlockHeader {
-    magic: BlockMagic,
+    _magic: BlockMagic,
     crc: BlockCrc,
-    randomized: Randomized,
+    _randomized: Randomized,
     orig_ptr: OriginPointer,
 }
 
@@ -474,22 +466,28 @@ struct BlockTrees {
 
 #[derive(Debug)]
 struct StreamFooter {
-    magic: FooterMagic,
+    _magic: FooterMagic,
     crc: StreamCrc,
-    padding: Padding,
+    _padding: Padding,
 }
 
 #[derive(Debug)]
-struct Level(u8);
+struct Level {
+    _level: u8,
+}
 
 #[derive(Debug)]
-struct BlockMagic(u64);
+struct BlockMagic {
+    _magic: u64,
+}
 
 #[derive(Debug)]
 struct BlockCrc(u32);
 
 #[derive(Debug)]
-struct Randomized(u8);
+struct Randomized {
+    _randomized: u8,
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct OriginPointer(u32);
@@ -552,16 +550,16 @@ impl SymbolMap {
 
         for (offset, l2) in l1_reader
             .enumerate()
-            .filter(|&(idx, bit)| (bit == Bit::One))
-            .map(|(idx, bit)| idx * 16)
+            .filter(|&(_idx, bit)| bit == Bit::One)
+            .map(|(idx, _bit)| idx * 16)
             .zip(&self.l2)
         {
             let l2 = l2.to_be_bytes();
             let l2_reader = Bitreader::new(&l2[..]).map(Result::unwrap);
             for symbol in l2_reader
                 .zip(0..16)
-                .filter(|&(bit, i)| (bit == Bit::One))
-                .map(|(bit, i)| offset + i)
+                .filter(|&(bit, _i)| bit == Bit::One)
+                .map(|(_bit, i)| offset + i)
             {
                 output.push(symbol.try_into().unwrap());
             }
@@ -587,63 +585,19 @@ struct FooterMagic;
 #[derive(Debug)]
 struct StreamCrc(u32);
 #[derive(Debug)]
-struct Padding(Vec<bitstream_too::Bit>);
+struct Padding {
+    _padding: Vec<bitstream_too::Bit>,
+}
 
 // =============================================================================
 
 pub fn decode(bytes: &[u8]) -> Result<BZipStream, DecodeError> {
-    let mut stream = bitstream_too::Bitreader::new(bytes);
-    let mut parser = Parser::new(stream);
+    let stream = bitstream_too::Bitreader::new(bytes);
+    let parser = Parser::new(stream);
 
     let bzip_file = parser.parse()?;
 
     Ok(bzip_file.stream)
-}
-
-/// The block size of the uncompressed data, in bytes.
-#[derive(Debug, PartialEq)]
-struct BlockSize(u32);
-
-impl BlockSize {
-    fn new(block_size: u8) -> Result<Self, DecodeError> {
-        if !(b'1'..=b'9').contains(&block_size) {
-            return Err(DecodeError::InvalidBlockSize);
-        }
-
-        let expanded_block_size = ((block_size - b'1' + 1) as u32) * 100_000;
-
-        Ok(Self(expanded_block_size))
-    }
-}
-
-fn block_size(bytes: &[u8]) -> Result<(BlockSize, &[u8]), DecodeError> {
-    if bytes.is_empty() {
-        return Err(DecodeError::unexpected_eof("there were no bytes"));
-    }
-
-    Ok((BlockSize::new(bytes[0])?, &bytes[1..]))
-}
-
-fn validate_header(bytes: &[u8]) -> Result<&[u8], DecodeError> {
-    if bytes.len() < 3 {
-        return Err(DecodeError::unexpected_eof("there were fewer than 3 bytes"));
-    }
-
-    match bytes {
-        [b'B', b'Z', b'h', rest @ ..] => Ok(rest),
-        _ => Err(DecodeError::InvalidHeader),
-    }
-}
-
-fn bcd_pi(bytes: &[u8]) -> Result<&[u8], DecodeError> {
-    if bytes.len() < 6 {
-        return Err(DecodeError::unexpected_eof("there were fewer than 6 bytes"));
-    }
-
-    match bytes {
-        [0x31, 0x41, 0x59, 0x26, 0x53, 0x59, rest @ ..] => Ok(rest),
-        _ => Err(DecodeError::InvalidBlockHeader),
-    }
 }
 
 #[cfg(test)]
@@ -652,7 +606,6 @@ mod tests {
 
     /// Test [`bzip_crc32`].
     mod test_bzip_crc32 {
-        use crc_thirty_too::crc;
 
         use super::*;
 
@@ -710,7 +663,7 @@ mod tests {
 
                     let file = parser.parse().expect("This should not fail to parse");
 
-                    assert_eq!(file.stream.header.level.0, 1);
+                    assert_eq!(file.stream._header._level._level, 1);
                     assert_eq!(file.stream.blocks.len(), 0);
                     assert_eq!(file.stream.footer.crc.0, 0);
                 }
@@ -723,7 +676,7 @@ mod tests {
 
                     let file = parser.parse().expect("This should not fail to parse");
 
-                    assert_eq!(file.stream.header.level.0, 9);
+                    assert_eq!(file.stream._header._level._level, 9);
                     assert_eq!(file.stream.blocks.len(), 0);
                     assert_eq!(file.stream.footer.crc.0, 0);
                 }
@@ -731,35 +684,9 @@ mod tests {
         }
     }
 
-    /// Test block size reading.
-    mod read_block_size {
-        use super::*;
-
-        /// A valid block size.
-        #[test]
-        fn valid() {
-            let input = b"3test";
-
-            let (block_size, bytes) = block_size(input).expect("The block size should be valid");
-
-            assert_eq!(block_size, BlockSize(300_000));
-            assert_eq!(bytes, b"test");
-        }
-    }
-
     /// Test header validation.
     mod header_validation {
         use super::*;
-
-        /// Just right. A valid header, followed by other data.
-        #[test]
-        fn just_right() {
-            let input = b"BZhtest";
-
-            let decoded = validate_header(input).expect("This should pass validation.");
-
-            assert_eq!(decoded, b"test");
-        }
 
         /// Too short.
         #[test]
